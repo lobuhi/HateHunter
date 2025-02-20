@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" alt="Logo" width="300"/>
+</p>
+
 # HateHunter: Detect Hate Speech on YouTube with AI
 
 HateHunter is a command-line Python tool that scans YouTube content for hate speech using OpenAI's Moderation API. Effortlessly identify and analyze harmful content with AI-driven moderation.
