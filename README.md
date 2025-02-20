@@ -81,7 +81,7 @@ These options allow you to tailor the tool's behavior to your needs, whether you
 python3 hatehunter.py --openai-api-key <YOUR_API_KEY> --language es --video https://www.youtube.com/watch?v=VIDEO_ID -k "term1, term2, term3" -p projectname
 ```
 
-### Example 2: Process multiple videos channel
+### Example 2: Process multiple videos
 ```bash
 python3 hatehunter.py --openai-api-key <YOUR_API_KEY> --language es --video https://www.youtube.com/watch?v=VIDEO_ID --video https://www.youtube.com/watch?v=VIDEO_ID2 --video https://www.youtube.com/watch?v=VIDEO_ID3 -k "term1, term2, term3" -p projectname
 ```
