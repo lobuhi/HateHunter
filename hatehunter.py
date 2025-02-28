@@ -57,6 +57,31 @@ def check_videos_already_processed(project, video_urls):
             sys.exit(0)
 
 ###############################
+# Thumbnail functions
+###############################
+
+def ensure_thumbnail(video_id):
+    """
+    Ensure that a thumbnail for the given video_id exists in the 'thumbnails' folder.
+    Downloads the thumbnail from YouTube if necessary.
+    """
+    folder = "thumbnails"
+    os.makedirs(folder, exist_ok=True)
+    thumb_path = os.path.join(folder, f"{video_id}.jpg")
+    if not os.path.exists(thumb_path):
+        url = f"https://img.youtube.com/vi/{video_id}/mqdefault.jpg"
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                with open(thumb_path, "wb") as f:
+                    f.write(response.content)
+                print(f"Downloaded thumbnail for video {video_id}")
+            else:
+                print(f"Failed to download thumbnail for video {video_id} (status code {response.status_code})")
+        except Exception as e:
+            print(f"Error downloading thumbnail for video {video_id}: {e}")
+
+###############################
 # Conversion functions (from convertsrt.py)
 ###############################
 
@@ -247,14 +272,14 @@ def download_subtitles_for_video(video_url, language):
 
 def moderate_text(text):
     """
-    Use the OpenAI Moderation API via a direct HTTP request.
+    Use the OpenAI Moderation API via a direct HTTP request with the omni-moderation-latest model.
     """
     url = "https://api.openai.com/v1/moderations"
     headers = {
         "Authorization": f"Bearer {openai.api_key}",
         "Content-Type": "application/json"
     }
-    payload = {"input": text, "model": "text-moderation-latest"}
+    payload = {"input": text, "model": "omni-moderation-latest"}
     response = requests.post(url, headers=headers, json=payload)
     if response.status_code != 200:
         raise Exception(f"Moderation API request failed with status code {response.status_code}: {response.text}")
@@ -334,6 +359,7 @@ def merge_analysis_results(keywords, project):
     Analyze all .s30 files in the current directory, merge their moderation results
     with any existing project file (filtering duplicates by Filename, Timestamp, and Texto),
     write a single merged JSON and HTML file, and then delete all *.srt and *.s30 files.
+    Additionally, ensure that a thumbnail is downloaded for each video and display it in the HTML.
     """
     s30_files = glob.glob("*.s30")
     new_results = []
@@ -360,8 +386,12 @@ def merge_analysis_results(keywords, project):
     merged_results.sort(key=lambda x: (x["Filename"], x.get("Timestamp") if x.get("Timestamp") is not None else 0))
     for item in merged_results:
         item["Texto"] = highlight_text(item["Texto"], keywords)
+        # Ensure the thumbnail exists for this video
+        video_id = item["Filename"].split('.')[0]
+        ensure_thumbnail(video_id)
     with open(project_json, "w", encoding="utf-8") as f:
         json.dump(merged_results, f, ensure_ascii=False, indent=4)
+    # Build HTML content with thumbnail image in the first column.
     html_content = '''<!DOCTYPE html>
 <html>
 <head>
@@ -369,8 +399,9 @@ def merge_analysis_results(keywords, project):
     <title>Moderation Results - {project}</title>
     <style>
         table {{ border-collapse: collapse; width: 100%; }}
-        th, td {{ padding: 8px; border: 1px solid #ccc; }}
+        th, td {{ padding: 8px; border: 1px solid #ccc; text-align: center; }}
         th {{ background-color: #f2f2f2; }}
+        img.thumbnail {{ width: 80px; height: auto; display: block; margin: 0 auto; }}
     </style>
 </head>
 <body>
@@ -378,7 +409,7 @@ def merge_analysis_results(keywords, project):
     <table id="resultsTable">
         <thead>
             <tr>
-                <th>Filename</th>
+                <th>Video & Filename</th>
                 <th>Timestamp</th>
                 <th>Texto</th>
                 <th>Categorías</th>
@@ -393,9 +424,11 @@ def merge_analysis_results(keywords, project):
         const tableBody = document.getElementById('resultsTable').getElementsByTagName('tbody')[0];
         data.forEach(item => {{
             const row = tableBody.insertRow();
-            let displayFilename = item.Filename.split('.')[0];
+            // Extract video id from Filename
+            let videoId = item.Filename.split('.')[0];
             const filenameCell = row.insertCell();
-            filenameCell.textContent = displayFilename;
+            // Add thumbnail image and filename
+            filenameCell.innerHTML = `<img class="thumbnail" src="thumbnails/${{videoId}}.jpg" alt="Thumbnail"><br>${{videoId}}`;
             const timestampCell = row.insertCell();
             timestampCell.textContent = item.Timestamp;
             const textoCell = row.insertCell();
@@ -419,6 +452,7 @@ def merge_analysis_results(keywords, project):
     with open(project_html, "w", encoding="utf-8") as f:
         f.write(html_content)
     print(f"Merged moderation results exported to {project_json} and {project_html}")
+    # Cleanup: delete all .srt and .s30 files
     for pattern in ["*.srt", "*.s30"]:
         for f in glob.glob(pattern):
             try:
