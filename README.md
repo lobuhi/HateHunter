@@ -112,7 +112,7 @@ python hatehunter.py \
 | `--channel` | YouTube channel URL | - |
 | `--openai-api-key` | OpenAI API key | Required |
 | `--threshold` | Chunk of seconds to analyse | 30 |
-| `--rate-limit` | Delay between API calls (seconds) | 1 |
+| `--rate-limit` | Define request/second to OpenAI API | 10 |
 | `--keywords` | Comma-separated keywords to focus on | - |
 | `--comments` | Enable comment analysis | False |
 | `--language` | Content language | en |
