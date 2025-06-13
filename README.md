@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" alt="Logo" width="200"/>
+  <img src="logo.png" alt="Logo" width="300"/>
 </p>
 
 # HateHunter 🎯
@@ -9,7 +9,7 @@
 HateHunter is a comprehensive analysis platform that uses OpenAI's GPT models to identify, categorize, and report hate speech, discriminatory language, and harmful content across YouTube channels and individual videos. The tool analyzes both video subtitles and comment sections, providing detailed reports with highlighted problematic content.
 
 <p align="center">
-  <img src="hatehunter_demo.jpg" alt="Logo" width="400"/>
+  <img src="hatehunter_demo.jpg" alt="Logo" width="800"/>
 </p>
 
 ## ✨ Features
