@@ -1,0 +1,1403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Videos - {{ project }} | HateHunter</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <style>
+        /* Popup Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(3px);
+        }
+
+        .modal-content {
+            background-color: var(--white);
+            margin: 2% auto;
+            padding: 0;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 800px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: var(--shadow-xl);
+            border: 1px solid var(--gray-200);
+        }
+
+        .modal-header {
+            background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%);
+            color: var(--white);
+            padding: 24px;
+            border-radius: 12px 12px 0 0;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .modal-header p {
+            margin: 8px 0 0 0;
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .close {
+            position: absolute;
+            right: 20px;
+            top: 20px;
+            color: var(--white);
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: background-color 0.2s;
+        }
+
+        .close:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+
+        /* Queue Status Bar */
+        .queue-status-bar {
+            background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+            border: 1px solid var(--gray-300);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .queue-status-bar.active {
+            display: block;
+        }
+
+        .queue-status-bar h4 {
+            margin: 0 0 12px 0;
+            color: var(--gray-700);
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .queue-stats {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .queue-stat {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .queue-stat-label {
+            color: var(--gray-600);
+            font-size: 14px;
+        }
+
+        .queue-stat-value {
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .queue-stat-value.processing {
+            color: var(--warning);
+        }
+
+        .queue-stat-value.queued {
+            color: #6366f1;
+        }
+
+        .queue-stat-value.completed {
+            color: var(--success);
+        }
+
+        .queue-stat-value.failed {
+            color: var(--error);
+        }
+
+        /* Empty state styling */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--gray-600);
+        }
+
+        .empty-state h3 {
+            margin-bottom: 12px;
+            color: var(--gray-700);
+        }
+
+        .empty-state p {
+            margin-bottom: 24px;
+        }
+
+        /* Temporary message animations */
+        @keyframes slideInFromTop {
+            from {
+                transform: translateX(-50%) translateY(-100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(-50%) translateY(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOutToTop {
+            from {
+                transform: translateX(-50%) translateY(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(-50%) translateY(-100%);
+                opacity: 0;
+            }
+        }
+
+        /* Indicator for saved API key */
+        .api-key-saved-indicator {
+            display: none;
+            font-size: 12px;
+            color: var(--success);
+            margin-top: 4px;
+        }
+
+        .api-key-saved-indicator.show {
+            display: block;
+        }
+
+        /* Modal overlay behavior - prevent closing on outside click */
+        .modal.no-outside-close {
+            pointer-events: auto;
+        }
+
+        .modal.no-outside-close .modal-content {
+            pointer-events: auto;
+        }
+    </style>
+</head>
+<body>
+    <!-- WebSocket Status -->
+    <div class="ws-status">
+        <div class="ws-indicator"></div>
+        <span class="ws-status-text">Connecting...</span>
+    </div>
+
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🎬 Videos - {{ project }}</h1>
+            <div class="nav-links">
+                <a href="/" class="nav-link">🏠 Dashboard</a>
+                <a href="/project/{{ project }}/videos" class="nav-link active">📹 Videos</a>
+                <a href="/project/{{ project }}/subtitles" class="nav-link" id="subtitles-link">📄 Subtitles</a>
+                <a href="/project/{{ project }}/comments" class="nav-link" id="comments-link">💬 Comments</a>
+            </div>
+        </div>
+
+        <div id="error-container"></div>
+        
+        <div id="loading" class="loading">
+            <p>Loading videos...</p>
+        </div>
+        
+        <div id="content-container" style="display: none;">
+            <!-- Queue Status Bar -->
+            <div id="queueStatusBar" class="queue-status-bar">
+                <h4>📊 Processing Queue Status</h4>
+                <div class="queue-stats">
+                    <div class="queue-stat">
+                        <span class="queue-stat-label">Processing:</span>
+                        <span class="queue-stat-value processing" id="queueProcessingCount">0</span>
+                    </div>
+                    <div class="queue-stat">
+                        <span class="queue-stat-label">Queued:</span>
+                        <span class="queue-stat-value queued" id="queueQueuedCount">0</span>
+                    </div>
+                    <div class="queue-stat">
+                        <span class="queue-stat-label">Completed:</span>
+                        <span class="queue-stat-value completed" id="queueCompletedCount">0</span>
+                    </div>
+                    <div class="queue-stat">
+                        <span class="queue-stat-label">Failed:</span>
+                        <span class="queue-stat-value failed" id="queueFailedCount">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stats" id="stats">
+                <strong>Total videos:</strong> <span id="total-count">0</span><br>
+                <strong>Videos with flags:</strong> <span id="flagged-count">0</span><br>
+                <strong>Processing videos:</strong> <span id="processing-count">0</span><br>
+                <strong>Generated on:</strong> <span id="timestamp"></span>
+            </div>
+
+            <div class="controls">
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="Search by title, channel or ID...">
+                </div>
+                <div class="filters">
+                    <select id="sortBy" class="btn-filter">
+                        <option value="status">Sort by Status</option>
+                        <option value="title">Sort by Title</option>
+                        <option value="upload_date">Upload Date</option>
+                        <option value="view_count">Views</option>
+                        <option value="flagged_total">Total Flags</option>
+                    </select>
+                    <button id="filterFlags" class="btn-filter">
+                        <i class="fas fa-flag"></i> Only with Flags
+                    </button>
+                    <button id="refreshData" class="btn-filter">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                    <button id="addVideoBtn" class="add-video-btn">
+                        ➕ Add Video
+                    </button>
+                </div>
+            </div>
+
+            <div class="videos-grid" id="videosContainer">
+                <!-- Videos will be rendered here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Video Modal -->
+    <div id="addVideoModal" class="modal no-outside-close">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="close">&times;</span>
+                <h2>🎯 Add Videos to HateHunter Analysis</h2>
+                <p>Configure analysis parameters and add videos to the {{ project }} project</p>
+            </div>
+            
+            <div class="modal-body">
+                <form id="analysisForm">
+                    <!-- Video Input Section -->
+                    <div class="form-section">
+                        <h3>📹 Video Input</h3>
+                        
+                        <div class="input-mode-toggle">
+                            <button type="button" id="singleVideoMode" class="active">Single Videos</button>
+                            <button type="button" id="channelMode">Full Channel</button>
+                        </div>
+
+                        <!-- Single Video Mode -->
+                        <div id="singleVideoSection">
+                            <div class="input-group">
+                                <div class="form-group">
+                                    <label for="videoUrl">YouTube Video URL or ID</label>
+                                    <input type="text" id="videoUrl" placeholder="https://www.youtube.com/watch?v=... or video ID">
+                                    <small>Paste YouTube video URL or just the video ID</small>
+                                </div>
+                                <button type="button" id="addVideoToList">Add</button>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>Videos to Analyze (<span id="videoCount">0</span>)</label>
+                                <div id="videosList" class="videos-list">
+                                    <div style="text-align: center; color: #999; padding: 20px;">
+                                        No videos added yet
+                                    </div>
+                                </div>
+                                <small style="color: var(--info); font-weight: 500;">
+                                    ℹ️ Videos will be added to the processing queue and analyzed automatically one by one.
+                                </small>
+                            </div>
+                        </div>
+
+                        <!-- Channel Mode -->
+                        <div id="channelSection" style="display: none;">
+                            <div class="form-group">
+                                <label for="channelUrl">YouTube Channel URL</label>
+                                <input type="text" id="channelUrl" placeholder="https://www.youtube.com/@channelname">
+                                <small>Full URL of the YouTube channel to analyze all videos</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Analysis Options -->
+                    <div class="form-section">
+                        <h3>⚙️ Analysis Options</h3>
+                        
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="analyzeSubtitles" checked>
+                            <label for="analyzeSubtitles">Analyze Subtitles</label>
+                        </div>
+                        
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="analyzeComments">
+                            <label for="analyzeComments">Analyze Comments</label>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="language">Subtitle Language</label>
+                            <select id="language">
+                                <option value="en">English</option>
+                                <option value="es">Spanish</option>
+                                <option value="fr">French</option>
+                                <option value="de">German</option>
+                                <option value="it">Italian</option>
+                                <option value="pt">Portuguese</option>
+                                <option value="auto">Auto-generated</option>
+                            </select>
+                            <small>Primary language for subtitle download (will fallback to English/Auto if not available)</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="keywords">Keywords Filter (Optional)</label>
+                            <input type="text" id="keywords" placeholder="hate, racist, violence">
+                            <small>Comma-separated keywords to filter content before analysis (leave empty to analyze all)</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="threshold">SRT Grouping Threshold (seconds)</label>
+                            <input type="number" id="threshold" value="30" min="1" max="300">
+                            <small>Time threshold for grouping subtitle segments (default: 30 seconds)</small>
+                        </div>
+                    </div>
+
+                    <!-- API Configuration -->
+                    <div class="form-section">
+                        <h3>🔑 API Configuration</h3>
+                        
+                        <div class="form-group">
+                            <label for="openaiKey">OpenAI API Key</label>
+                            <input type="password" id="openaiKey" placeholder="sk-...">
+                            <small>Required for content moderation. Can also be set as OPENAI_API_KEY environment variable</small>
+                            <div class="api-key-saved-indicator" id="apiKeySavedIndicator">
+                                ✅ API key loaded from session storage
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="rateLimit">API Rate Limit (requests/second)</label>
+                            <input type="number" id="rateLimit" value="10" min="1" max="100">
+                            <small>Maximum API requests per second to avoid rate limiting</small>
+                        </div>
+                    </div>
+
+                    <!-- Advanced Options -->
+                    <div class="form-section">
+                        <h3>🔧 Advanced Options</h3>
+                        
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="updateYtdlp">
+                            <label for="updateYtdlp">Update yt-dlp before processing</label>
+                        </div>
+
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="skipConvert">
+                            <label for="skipConvert">Skip SRT conversion</label>
+                        </div>
+
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="skipAnalyze">
+                            <label for="skipAnalyze">Skip content analysis</label>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" id="cancelBtn">Cancel</button>
+                <button type="button" class="btn-primary" id="startAnalysisBtn">
+                    🚀 Add to Queue
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
+    
+    <script>
+        const projectName = '{{ project }}';
+        let socket;
+        let allVideos = [];
+        let filteredVideos = [];
+        let filterFlags = false;
+        let dataLoaded = false;
+        
+        // Modal and form variables
+        let modal;
+        let videosToAnalyze = [];
+        
+        // Processing state tracking
+        let processingStates = {
+            pending: 0,
+            processing: 0,
+            queued: 0,
+            completed: 0,
+            failed: 0
+        };
+        
+        function init() {
+            console.log('🔍 DEBUG: init() called for project:', projectName);
+            
+            document.getElementById('timestamp').textContent = new Date().toLocaleString();
+            
+            bindEvents();
+            initModal();
+            loadApiKeyFromStorage();
+            initWebSocket();
+            
+            // Force a direct API call after a short delay
+            setTimeout(() => {
+                console.log('🔍 DEBUG: Checking if data loaded:', dataLoaded);
+                if (!dataLoaded) {
+                    console.log('🔍 DEBUG: Data not loaded, trying API fallback...');
+                    loadVideosViaAPI();
+                }
+            }, 2000);
+        }
+
+        function bindEvents() {
+            // Search
+            document.getElementById('searchInput').addEventListener('input', () => {
+                filterVideos();
+            });
+
+            // Sort
+            document.getElementById('sortBy').addEventListener('change', () => {
+                sortVideos();
+            });
+
+            // Filter flags
+            document.getElementById('filterFlags').addEventListener('click', (e) => {
+                filterFlags = !filterFlags;
+                e.target.classList.toggle('active', filterFlags);
+                filterVideos();
+            });
+
+            // Refresh
+            document.getElementById('refreshData').addEventListener('click', () => {
+                loadData();
+            });
+
+            // Add Video button
+            document.getElementById('addVideoBtn').addEventListener('click', () => {
+                openModal();
+            });
+        }
+
+        function initModal() {
+            modal = document.getElementById('addVideoModal');
+            const span = document.getElementsByClassName('close')[0];
+            const cancelBtn = document.getElementById('cancelBtn');
+            const startBtn = document.getElementById('startAnalysisBtn');
+
+            // Modal controls - UPDATED: Remove outside click closing
+            span.onclick = closeModal;
+            cancelBtn.onclick = closeModal;
+            startBtn.onclick = startAnalysis;
+
+            // REMOVED: Outside click closing functionality
+            // The modal now has class "no-outside-close" to prevent this
+
+            // Input mode toggle
+            document.getElementById('singleVideoMode').addEventListener('click', () => {
+                setInputMode('single');
+            });
+            
+            document.getElementById('channelMode').addEventListener('click', () => {
+                setInputMode('channel');
+            });
+
+            // Add video to list
+            document.getElementById('addVideoToList').addEventListener('click', addVideoToList);
+            
+            // Allow Enter key in video URL input
+            document.getElementById('videoUrl').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addVideoToList();
+                }
+            });
+
+            // API Key storage events
+            document.getElementById('openaiKey').addEventListener('input', saveApiKeyToStorage);
+        }
+
+        function loadApiKeyFromStorage() {
+            try {
+                const savedApiKey = sessionStorage.getItem('hatehunter_openai_api_key');
+                if (savedApiKey) {
+                    document.getElementById('openaiKey').value = savedApiKey;
+                    document.getElementById('apiKeySavedIndicator').classList.add('show');
+                    console.log('✅ Loaded OpenAI API key from session storage');
+                }
+            } catch (error) {
+                console.warn('Could not load API key from session storage:', error);
+            }
+        }
+
+        function saveApiKeyToStorage() {
+            try {
+                const apiKey = document.getElementById('openaiKey').value.trim();
+                if (apiKey && apiKey.startsWith('sk-')) {
+                    sessionStorage.setItem('hatehunter_openai_api_key', apiKey);
+                    document.getElementById('apiKeySavedIndicator').classList.add('show');
+                    console.log('💾 Saved OpenAI API key to session storage');
+                } else if (apiKey === '') {
+                    sessionStorage.removeItem('hatehunter_openai_api_key');
+                    document.getElementById('apiKeySavedIndicator').classList.remove('show');
+                    console.log('🗑️ Removed OpenAI API key from session storage');
+                } else {
+                    document.getElementById('apiKeySavedIndicator').classList.remove('show');
+                }
+            } catch (error) {
+                console.warn('Could not save API key to session storage:', error);
+            }
+        }
+
+        function openModal() {
+            modal.style.display = 'block';
+            resetForm();
+            loadApiKeyFromStorage(); // Reload API key when opening modal
+        }
+
+        function closeModal() {
+            modal.style.display = 'none';
+            resetForm();
+        }
+
+        function resetForm() {
+            document.getElementById('analysisForm').reset();
+            videosToAnalyze = [];
+            updateVideosList();
+            setInputMode('single');
+            
+            // Reset checkboxes to default state
+            document.getElementById('analyzeSubtitles').checked = true;
+            document.getElementById('analyzeComments').checked = false;
+            
+            // Reload API key and show indicator if available
+            loadApiKeyFromStorage();
+        }
+
+        function setInputMode(mode) {
+            const singleBtn = document.getElementById('singleVideoMode');
+            const channelBtn = document.getElementById('channelMode');
+            const singleSection = document.getElementById('singleVideoSection');
+            const channelSection = document.getElementById('channelSection');
+
+            if (mode === 'single') {
+                singleBtn.classList.add('active');
+                channelBtn.classList.remove('active');
+                singleSection.style.display = 'block';
+                channelSection.style.display = 'none';
+            } else {
+                singleBtn.classList.remove('active');
+                channelBtn.classList.add('active');
+                singleSection.style.display = 'none';
+                channelSection.style.display = 'block';
+            }
+        }
+
+        function addVideoToList() {
+            const input = document.getElementById('videoUrl');
+            const url = input.value.trim();
+            
+            if (!url) {
+                alert('Please enter a video URL or ID');
+                return;
+            }
+
+            // Basic validation for YouTube URL/ID
+            const videoId = extractVideoId(url);
+            if (!videoId) {
+                alert('Invalid YouTube URL or video ID');
+                return;
+            }
+
+            // Check if already added
+            if (videosToAnalyze.some(v => v.id === videoId)) {
+                alert('Video already added to the list');
+                return;
+            }
+
+            // Add to list
+            videosToAnalyze.push({
+                id: videoId,
+                url: url.includes('http') ? url : `https://www.youtube.com/watch?v=${videoId}`,
+                title: `Video ${videoId}`
+            });
+
+            input.value = '';
+            updateVideosList();
+            input.focus();
+        }
+
+        function removeVideoFromList(index) {
+            videosToAnalyze.splice(index, 1);
+            updateVideosList();
+        }
+
+        function updateVideosList() {
+            const container = document.getElementById('videosList');
+            const count = document.getElementById('videoCount');
+            
+            count.textContent = videosToAnalyze.length;
+
+            if (videosToAnalyze.length === 0) {
+                container.innerHTML = '<div style="text-align: center; color: #999; padding: 20px;">No videos added yet</div>';
+                return;
+            }
+
+            container.innerHTML = videosToAnalyze.map((video, index) => `
+                <div class="video-item">
+                    <span title="${video.url}">${video.id}</span>
+                    <button onclick="removeVideoFromList(${index})">×</button>
+                </div>
+            `).join('');
+        }
+
+        function extractVideoId(url) {
+            // Handle direct video IDs
+            if (!url.includes('/') && !url.includes('?') && url.length === 11) {
+                return url;
+            }
+            
+            // Handle YouTube URLs
+            const patterns = [
+                /(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/,
+                /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/,
+                /youtube\.com\/v\/([a-zA-Z0-9_-]{11})/
+            ];
+            
+            for (const pattern of patterns) {
+                const match = url.match(pattern);
+                if (match) return match[1];
+            }
+            
+            return null;
+        }
+
+        async function startAnalysis() {
+            const isSingleMode = document.getElementById('singleVideoMode').classList.contains('active');
+
+            // Capture form data BEFORE closing modal
+            let formData = {};
+            
+            if (isSingleMode) {
+                if (videosToAnalyze.length === 0) {
+                    alert('Please add at least one video to analyze');
+                    return;
+                }
+                // Capture videos list before modal closes
+                formData.videos = [...videosToAnalyze]; // Create a copy
+            } else {
+                const channelUrl = document.getElementById('channelUrl').value.trim();
+                if (!channelUrl) {
+                    alert('Please enter a channel URL');
+                    return;
+                }
+                formData.channelUrl = channelUrl;
+            }
+
+            // Capture all form values before closing modal
+            formData.language = document.getElementById('language').value;
+            formData.threshold = parseInt(document.getElementById('threshold').value);
+            formData.rateLimit = parseInt(document.getElementById('rateLimit').value);
+            formData.analyzeSubtitles = document.getElementById('analyzeSubtitles').checked;
+            formData.analyzeComments = document.getElementById('analyzeComments').checked;
+            formData.openaiKey = document.getElementById('openaiKey').value;
+            formData.keywords = document.getElementById('keywords').value;
+            formData.updateYtdlp = document.getElementById('updateYtdlp').checked;
+            formData.skipConvert = document.getElementById('skipConvert').checked;
+            formData.skipAnalyze = document.getElementById('skipAnalyze').checked;
+
+            // NOW close modal immediately after capturing data
+            closeModal();
+            
+            // Show temporary message to indicate processing started
+            showTemporaryMessage('Adding videos to processing queue...', 3000, 'info');
+
+            try {
+                if (isSingleMode) {
+                    // Build queue commands using captured data
+                    const queueCommands = [];
+                    
+                    for (const video of formData.videos) {
+                        const command = buildHateHunterCommandWithData(video.url, formData);
+                        queueCommands.push(command);
+                    }
+                    
+                    // Send to server to create hatehunter.tmp
+                    const response = await fetch(`/api/project/${projectName}/queue`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            commands: queueCommands
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || `Failed to add to queue: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    showTemporaryMessage(`${result.videos_queued} video(s) added to processing queue!`, 4000, 'success');
+                    
+                    loadData();
+
+                } else {
+                    // Channel mode using captured data
+                    showTemporaryMessage('Processing channel...', 2000, 'info');
+                    
+                    const analysisParams = {
+                        project: projectName,
+                        channel: formData.channelUrl,
+                        language: formData.language,
+                        threshold: formData.threshold,
+                        rate_limit: formData.rateLimit,
+                        analyze_subtitles: formData.analyzeSubtitles,
+                        analyze_comments: formData.analyzeComments,
+                        openai_api_key: formData.openaiKey,
+                        keywords: formData.keywords.split(',').map(k => k.trim()).filter(k => k),
+                        update_ytdlp: formData.updateYtdlp,
+                        skip_convert: formData.skipConvert,
+                        skip_analyze: formData.skipAnalyze
+                    };
+                    
+                    const response = await fetch('/api/hatehunter/analyze', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(analysisParams)
+                    });
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || `Analysis failed: ${response.status}`);
+                    }
+                    
+                    const result = await response.json();
+                    showTemporaryMessage('Channel analysis started successfully!', 4000, 'success');
+                    
+                    loadData();
+                }
+
+            } catch (error) {
+                console.error('Error in startAnalysis:', error);
+                showTemporaryMessage(`❌ Error: ${error.message}`, 6000, 'error');
+            }
+        }
+
+        // Nueva función helper que usa datos capturados en lugar de leer del DOM
+        function buildHateHunterCommandWithData(videoUrl, formData) {
+            const cmd = ['python3', 'hatehunter.py'];
+            
+            // Project
+            cmd.push('--project', projectName);
+            
+            // Video URL
+            cmd.push('--video', videoUrl);
+            
+            // Language
+            cmd.push('--language', formData.language);
+            
+            // Keywords with basic sanitization
+            const keywords = formData.keywords
+                .replace(/[^a-zA-Z0-9\s,]/g, '')  // Remove special characters
+                .replace(/\s*,\s*/g, ',')          // Clean spaces around commas
+                .replace(/,+/g, ',')               // Remove duplicate commas
+                .replace(/^,+|,+$/g, '')           // Remove leading/trailing commas
+                .trim();
+            
+            if (keywords) {
+                cmd.push('--keywords', keywords);
+            }
+            
+            // Threshold
+            cmd.push('--threshold', formData.threshold.toString());
+            
+            // Rate limit
+            cmd.push('--rate-limit', formData.rateLimit.toString());
+            
+            // OpenAI API key
+            if (formData.openaiKey) {
+                cmd.push('--openai-api-key', formData.openaiKey);
+            }
+            
+            // Analysis options
+            if (formData.analyzeComments) {
+                cmd.push('--comments');
+            }
+            
+            // Advanced options
+            if (formData.updateYtdlp) {
+                cmd.push('--update-ytdlp');
+            }
+            if (formData.skipConvert) {
+                cmd.push('--skip-convert');
+            }
+            if (formData.skipAnalyze) {
+                cmd.push('--skip-analyze');
+            }
+            
+            return cmd.join(' ');
+        }
+        
+        function initWebSocket() {
+            try {
+                console.log('🔍 DEBUG: Initializing WebSocket...');
+                socket = io();
+                
+                socket.on('connect', function() {
+                    updateWebSocketStatus(true);
+                    socket.emit('join_project', { project: projectName });
+                    // Request initial data
+                    socket.emit('request_refresh', { project: projectName });
+                });
+                
+                socket.on('disconnect', function() {
+                    console.log('🔍 DEBUG: WebSocket disconnected');
+                    updateWebSocketStatus(false);
+                });
+
+                socket.on('project_data', function(data) {
+                    console.log('🔍 DEBUG: Received project_data:', data);
+                    if (data.project === projectName) {
+                        dataLoaded = true;
+                        displayVideos(data.videos || []);
+                    }
+                });
+
+                socket.on('video_added', function(data) {
+                    if (data.project === projectName) {
+                        // Check if video already exists
+                        const existingIndex = allVideos.findIndex(v => v.id === data.video.id);
+                        if (existingIndex === -1) {
+                            allVideos.push(data.video);
+                        } else {
+                            // Update existing video
+                            allVideos[existingIndex] = data.video;
+                        }
+                        filterVideos();
+                        updateStats(allVideos);
+                        showTemporaryMessage(`New video added: ${data.video.title || data.video.id}`, 3000, 'success');
+                    }
+                });
+                
+                // Listen for video status changes
+                socket.on('video_status_changed', function(data) {
+                    if (data.project === projectName) {
+                        console.log('🔍 DEBUG: Video status changed:', data);
+                        const videoIndex = allVideos.findIndex(v => v.id === data.video_id);
+                        if (videoIndex !== -1) {
+                            allVideos[videoIndex].processing_status = data.new_status;
+                            if (data.video_data) {
+                                // Update with fresh data if provided
+                                allVideos[videoIndex] = { ...allVideos[videoIndex], ...data.video_data };
+                            }
+                            filterVideos();
+                            updateStats(allVideos);
+                            updateQueueStatusBar();
+                        }
+                    }
+                });
+                
+                // Listen for analysis completion
+                socket.on('video_analysis_complete', function(data) {
+                    if (data.project === projectName) {
+                        console.log('🔍 DEBUG: Video analysis complete:', data);
+                        const videoIndex = allVideos.findIndex(v => v.id === data.video_id);
+                        if (videoIndex !== -1) {
+                            allVideos[videoIndex].processing_status = 'completed';
+                            allVideos[videoIndex].flagged_subtitles = data.flag_counts.flagged_subtitles || 0;
+                            allVideos[videoIndex].flagged_comments = data.flag_counts.flagged_comments || 0;
+                            filterVideos();
+                            updateStats(allVideos);
+                            updateQueueStatusBar();
+                            showTemporaryMessage(`Analysis complete for: ${allVideos[videoIndex].title || data.video_id}`, 4000, 'success');
+                        }
+                    }
+                });
+                
+                // Listen for data updates
+                socket.on('data_updated', function(data) {
+                    if (data.project === projectName) {
+                        console.log('🔍 DEBUG: Data updated:', data.type);
+                        loadData();
+                    }
+                });
+                
+                // Listen for queue updates
+                socket.on('queue_updated', function(data) {
+                    if (data.project === projectName) {
+                        console.log('🔍 DEBUG: Queue updated:', data);
+                        updateQueueStatusBar();
+                    }
+                });
+                
+            } catch (error) {
+                console.error('🔍 DEBUG: WebSocket init failed:', error);
+                loadVideosViaAPI();
+            }
+        }
+        
+        function updateWebSocketStatus(connected) {
+            const indicator = document.querySelector('.ws-indicator');
+            const statusText = document.querySelector('.ws-status-text');
+            
+            if (connected) {
+                indicator.classList.add('connected');
+                statusText.textContent = 'Connected';
+            } else {
+                indicator.classList.remove('connected');
+                statusText.textContent = 'Disconnected';
+            }
+        }
+        
+        function loadData() {
+            console.log('🔍 DEBUG: loadData() called');
+            if (socket && socket.connected) {
+                console.log('🔍 DEBUG: Using WebSocket to refresh data');
+                socket.emit('request_refresh', { project: projectName });
+            } else {
+                console.log('🔍 DEBUG: Using API to load data');
+                loadVideosViaAPI();
+            }
+        }
+        
+        function loadVideosViaAPI() {
+            console.log('🔍 DEBUG: loadVideosViaAPI() called');
+            
+            fetch(`/api/project/${projectName}/videos`)
+                .then(response => {
+                    console.log('🔍 DEBUG: API response status:', response.status);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('🔍 DEBUG: API response data:', data);
+                    dataLoaded = true;
+                    displayVideos(data.videos || []);
+                })
+                .catch(error => {
+                    console.error('🔍 DEBUG: API error:', error);
+                    showError(`Failed to load videos: ${error.message}`);
+                    // Still show the interface even if there's an error
+                    dataLoaded = true;
+                    displayVideos([]);
+                });
+        }
+        
+        function displayVideos(videos) {
+            console.log('🔍 DEBUG: displayVideos() called with', videos.length, 'videos');
+            allVideos = videos;
+            
+            const loading = document.getElementById('loading');
+            const container = document.getElementById('content-container');
+            
+            loading.style.display = 'none';
+            container.style.display = 'block';
+            
+            updateStats(videos);
+            updateQueueStatusBar();
+            filterVideos();
+            clearError();
+        }
+        
+        function updateStats(videos) {
+            const flaggedCount = videos.filter(v => 
+                (v.flagged_subtitles > 0) || (v.flagged_comments > 0)
+            ).length;
+            
+            const processingCount = videos.filter(v => 
+                v.processing_status === 'processing'
+            ).length;
+            
+            document.getElementById('total-count').textContent = videos.length;
+            document.getElementById('flagged-count').textContent = flaggedCount;
+            document.getElementById('processing-count').textContent = processingCount;
+            
+            // Update processing states
+            processingStates = {
+                pending: videos.filter(v => v.processing_status === 'pending').length,
+                processing: videos.filter(v => v.processing_status === 'processing').length,
+                queued: videos.filter(v => v.processing_status === 'queued').length,
+                completed: videos.filter(v => v.processing_status === 'completed').length,
+                failed: videos.filter(v => v.processing_status === 'failed').length
+            };
+        }
+        
+        function updateQueueStatusBar() {
+            const statusBar = document.getElementById('queueStatusBar');
+            const hasActiveQueue = processingStates.processing > 0 || processingStates.queued > 0;
+            
+            if (hasActiveQueue || processingStates.failed > 0) {
+                statusBar.classList.add('active');
+                
+                document.getElementById('queueProcessingCount').textContent = processingStates.processing;
+                document.getElementById('queueQueuedCount').textContent = processingStates.queued;
+                document.getElementById('queueCompletedCount').textContent = processingStates.completed;
+                document.getElementById('queueFailedCount').textContent = processingStates.failed;
+            } else {
+                statusBar.classList.remove('active');
+            }
+        }
+        
+        function filterVideos() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            
+            filteredVideos = allVideos.filter(video => {
+                const matchesSearch = !searchTerm || 
+                    (video.title && video.title.toLowerCase().includes(searchTerm)) ||
+                    (video.uploader && video.uploader.toLowerCase().includes(searchTerm)) ||
+                    (video.id && video.id.toLowerCase().includes(searchTerm));
+                
+                const hasFlags = (video.flagged_subtitles > 0) || (video.flagged_comments > 0);
+                const matchesFlags = !filterFlags || hasFlags;
+                
+                return matchesSearch && matchesFlags;
+            });
+
+            sortVideos();
+        }
+        
+        function sortVideos() {
+            const sortBy = document.getElementById('sortBy').value;
+            
+            filteredVideos.sort((a, b) => {
+                switch (sortBy) {
+                    case 'status':
+                        const statusOrder = {
+                            'processing': 0,
+                            'queued': 1,
+                            'pending': 2,
+                            'failed': 3,
+                            'completed': 4
+                        };
+                        return (statusOrder[a.processing_status] || 999) - (statusOrder[b.processing_status] || 999);
+                    case 'title':
+                        return (a.title || '').localeCompare(b.title || '');
+                    case 'upload_date':
+                        return (b.upload_date || '').localeCompare(a.upload_date || '');
+                    case 'view_count':
+                        return parseNumber(b.view_count) - parseNumber(a.view_count);
+                    case 'flagged_total':
+                        return (b.flagged_subtitles + b.flagged_comments) - (a.flagged_subtitles + a.flagged_comments);
+                    default:
+                        return 0;
+                }
+            });
+
+            renderVideos();
+        }
+        
+        function renderVideos() {
+            const container = document.getElementById('videosContainer');
+            container.innerHTML = '';
+            
+            if (filteredVideos.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h3>📂 No videos found</h3>
+                        <p>This project doesn't have any videos yet, or no videos match your search criteria.</p>
+                        <button onclick="openModal()" class="btn-primary" style="margin-top: 16px;">
+                            ➕ Add Your First Video
+                        </button>
+                    </div>
+                `;
+                return;
+            }
+
+            filteredVideos.forEach(video => {
+                const videoEl = createVideoCard(video);
+                container.appendChild(videoEl);
+            });
+        }
+        
+        function createVideoCard(video) {
+            const card = document.createElement('div');
+            card.className = 'video-card';
+            card.setAttribute('data-video-id', video.id);
+            
+            // Add processing status class
+            const status = video.processing_status || 'completed';
+            if (status === 'processing') {
+                card.classList.add('processing-active');
+            } else if (status === 'queued') {
+                card.classList.add('processing-queued');
+            } else if (status === 'pending') {
+                card.classList.add('processing-pending');
+            } else if (status === 'failed') {
+                card.classList.add('processing-failed');
+            }
+
+            card.innerHTML = `
+                <div class="video-thumbnail">
+                    <img src="${video.thumbnail}" alt="Thumbnail" 
+                         onerror="this.src='https://via.placeholder.com/320x180/ddd/999?text=No+Image'">
+                    ${video.duration ? `<div class="video-duration">${video.duration}</div>` : ''}
+                    ${getProcessingBadge(status)}
+                </div>
+                <div class="video-content">
+                    <div class="video-title">${escapeHtml(video.title || 'No title')}</div>
+                    <div class="video-meta">
+                        <div><strong>Channel:</strong> ${escapeHtml(video.uploader || 'Unknown')}</div>
+                        ${video.upload_date ? `<div><strong>Date:</strong> ${video.upload_date}</div>` : ''}
+                        <div><strong>ID:</strong> ${video.id}</div>
+                    </div>
+                    
+                    <div class="video-stats">
+                        <div style="font-size: 12px; color: #666;">
+                            ${video.view_count ? `👁️ ${formatNumber(video.view_count)}` : ''}
+                            ${video.comment_count ? ` | 💬 ${formatNumber(video.comment_count)}` : ''}
+                        </div>
+                        <a href="${video.webpage_url}" target="_blank" class="watch-btn">
+                            ▶️ Watch
+                        </a>
+                    </div>
+                    
+                    <div class="flag-badges">
+                        ${getProcessingFlags(status, video)}
+                        ${status === 'completed' ? getCompletedFlags(video) : ''}
+                        
+                        <button class="flag-badge remove-flag" 
+                                onclick="removeVideo('${video.id}')" 
+                                title="Remove this video from the project">
+                            🗑️ Remove
+                        </button>
+                    </div>
+                </div>
+            `;
+
+            return card;
+        }
+        
+        function getProcessingBadge(status) {
+            switch (status) {
+                case 'processing':
+                    return `<div class="processing-badge processing-active">
+                        <div class="processing-spinner"></div>
+                        Processing
+                    </div>`;
+                case 'queued':
+                    return `<div class="processing-badge processing-queued">
+                        🕐 Queued
+                    </div>`;
+                case 'pending':
+                    return `<div class="processing-badge processing-pending">
+                        ⏸️ Pending
+                    </div>`;
+                case 'failed':
+                    return `<div class="processing-badge processing-failed">
+                        ❌ Failed
+                    </div>`;
+                default:
+                    return '';
+            }
+        }
+        
+        function getProcessingFlags(status, video) {
+            switch (status) {
+                case 'processing':
+                    return `<div class="processing-flags processing-active">
+                        <div class="processing-spinner"></div>
+                        Analyzing content...
+                    </div>`;
+                case 'queued':
+                    return `<div class="processing-flags processing-queued">
+                        Waiting in queue
+                    </div>`;
+                case 'pending':
+                    return `<div class="processing-flags processing-pending">
+                        Ready to process
+                    </div>`;
+                case 'failed':
+                    return `<div class="processing-flags processing-failed">
+                        ${video.processing_error || 'Processing failed'}
+                    </div>`;
+                default:
+                    return '';
+            }
+        }
+        
+        function getCompletedFlags(video) {
+            if (video.flagged_subtitles > 0 || video.flagged_comments > 0) {
+                return `
+                    ${video.flagged_subtitles > 0 ? `
+                        <a href="/project/${projectName}/subtitles#${video.id}" class="flag-badge subtitle-flag">
+                            ${video.flagged_subtitles} subtitle flags
+                        </a>
+                    ` : ''}
+                    
+                    ${video.flagged_comments > 0 ? `
+                        <a href="/project/${projectName}/comments#${video.id}" class="flag-badge comment-flag">
+                            ${video.flagged_comments} comment flags
+                        </a>
+                    ` : ''}
+                `;
+            } else {
+                return '<span class="flag-badge no-flags">No flags detected</span>';
+            }
+        }
+        
+        function removeVideo(videoId) {
+            if (!confirm(`Are you sure you want to remove video ${videoId}?`)) {
+                return;
+            }
+            
+            fetch(`/api/project/${projectName}/video/${videoId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                allVideos = allVideos.filter(v => v.id !== videoId);
+                filterVideos();
+                updateStats(allVideos);
+                updateQueueStatusBar();
+                showTemporaryMessage(`Video ${videoId} was removed successfully`, 3000, 'success');
+            })
+            .catch(error => {
+                console.error('Error removing video:', error);
+                showError(`Failed to remove video: ${error.message}`);
+            });
+        }
+        
+        function showTemporaryMessage(message, duration = 3000, type = 'success') {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'temporary-message';
+            messageDiv.textContent = message;
+            
+            let backgroundColor;
+            switch(type) {
+                case 'error':
+                    backgroundColor = '#dc2626';
+                    break;
+                case 'warning':
+                    backgroundColor = '#d97706';
+                    break;
+                case 'info':
+                    backgroundColor = '#2563eb';
+                    break;
+                case 'success':
+                default:
+                    backgroundColor = '#059669';
+                    break;
+            }
+            
+            messageDiv.style.cssText = `
+                position: fixed;
+                top: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                background-color: ${backgroundColor};
+                color: white;
+                padding: 12px 24px;
+                border-radius: 6px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                z-index: 1001;
+                font-weight: 500;
+                max-width: 90%;
+                text-align: center;
+                animation: slideInFromTop 0.3s ease-out;
+            `;
+            
+            document.body.appendChild(messageDiv);
+            
+            setTimeout(() => {
+                messageDiv.style.animation = 'slideOutToTop 0.3s ease-in';
+                setTimeout(() => {
+                    messageDiv.remove();
+                }, 300);
+            }, duration);
+        }
+        
+        function showError(message) {
+            const container = document.getElementById('error-container');
+            container.innerHTML = `<div class="error">${message}</div>`;
+            
+            // Also hide loading and show content
+            const loading = document.getElementById('loading');
+            const content = document.getElementById('content-container');
+            loading.style.display = 'none';
+            content.style.display = 'block';
+        }
+        
+        function clearError() {
+            const container = document.getElementById('error-container');
+            container.innerHTML = '';
+        }
+        
+        // Utility functions
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+        }
+        
+        function formatNumber(num) {
+            if (!num) return '';
+            if (typeof num === 'string') return num;
+            
+            if (num >= 1000000) {
+                return (num / 1000000).toFixed(1) + 'M';
+            } else if (num >= 1000) {
+                return (num / 1000).toFixed(1) + 'K';
+            } else {
+                return num.toString();
+            }
+        }
+        
+        function parseNumber(str) {
+            if (!str) return 0;
+            if (typeof str === 'number') return str;
+            
+            const num = parseFloat(str.replace(/[^0-9.]/g, ''));
+            if (str.includes('M')) return num * 1000000;
+            if (str.includes('K')) return num * 1000;
+            return num || 0;
+        }
+        
+        // Initialize immediately when script loads
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    </script>
+</body>
+</html>

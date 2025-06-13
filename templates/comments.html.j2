@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Video Comments Moderation - {{ project }}</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <!-- WebSocket Status -->
+    <div class="ws-status">
+        <div class="ws-indicator"></div>
+        <span class="ws-status-text">Connecting...</span>
+    </div>
+
+    <div class="container">
+        <div class="header">
+            <h1>💬 Video Comments Moderation Results - {{ project }}</h1>
+            <div class="nav-links">
+                <a href="/" class="nav-link">🏠 Dashboard</a>
+                <a href="/project/{{ project }}/videos" class="nav-link" id="videos-link">📹 Videos</a>
+                <a href="/project/{{ project }}/subtitles" class="nav-link" id="subtitles-link">🎬 Subtitles</a>
+            </div>
+        </div>
+        
+        <div id="error-container"></div>
+        
+        <div id="loading" class="loading">
+            <p>Loading comments...</p>
+        </div>
+        
+        <div id="content-container" style="display: none;">
+            <div class="stats" id="stats">
+                <strong>Total flagged comments:</strong> <span id="total-count">0</span><br>
+                <strong>Categories found:</strong> <span id="categories-list">None</span><br>
+                <strong>Generated on:</strong> <span id="timestamp"></span>
+            </div>
+            
+            <div class="filter-stats" id="filterStats">
+                <strong>Filtered results:</strong> <span id="filteredCount">0</span> / <span id="totalItems">0</span> items shown
+            </div>
+            
+            <div class="controls">
+                <button class="clear-filters" onclick="clearAllFilters()">Clear All Filters</button>
+                <button class="clear-reports" onclick="clearAllReports()">Clear All Reports</button>
+            </div>
+            
+            <table id="dataTable">
+                <thead>
+                    <tr>
+                        <th style="width: 60px;">Report</th>
+                        <th style="width: 120px;">Video</th>
+                        <th style="width: 200px;">Author</th>
+                        <th style="width: 50%;">Comment Text</th>
+                        <th style="width: 180px;">Moderation Categories</th>
+                        <th style="width: 120px;">View Comment</th>
+                    </tr>
+                    <tr class="filter-row">
+                        <th>
+                            <input type="checkbox" id="filter-reported" onchange="filterTable()" title="Show only reported">
+                        </th>
+                        <th>
+                            <input type="text" class="filter-input" id="filter-video" placeholder="Filter video ID..." onkeyup="filterTable()">
+                        </th>
+                        <th>
+                            <input type="text" class="filter-input" id="filter-author" placeholder="Filter author..." onkeyup="filterTable()">
+                        </th>
+                        <th>
+                            <input type="text" class="filter-input" id="filter-text" placeholder="Filter text..." onkeyup="filterTable()">
+                        </th>
+                        <th>
+                            <input type="text" class="filter-input" id="filter-categories" placeholder="Filter categories..." onkeyup="filterTable()">
+                        </th>
+                        <th>
+                            <input type="text" class="filter-input" id="filter-view" placeholder="Filter status..." onkeyup="filterTable()">
+                        </th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="report-status" id="reportStatus">
+            <span class="report-count" id="reportCount">0</span> items reported
+        </div>
+    </div>
+    
+    <!-- Active Users -->
+    <div class="active-users">
+        <h3>Active Users (<span class="active-users-count">0</span>)</h3>
+        <div class="user-list"></div>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
+    <script>
+        const projectName = '{{ project }}';
+        let socket;
+        let allComments = [];
+        let reportedItems = new Set(); // Now we use database IDs as strings
+        
+        let dataLoaded = false; // Flag to avoid multiple loads
+        
+        function init() {
+            console.log('Loading comments for project:', projectName);
+            document.getElementById('timestamp').textContent = new Date().toLocaleString();
+            
+            // Initialize WebSocket status
+            initWebSocketStatus();
+            
+            // Setup event listeners
+            const filterInputs = document.querySelectorAll('.filter-input');
+            filterInputs.forEach(input => {
+                input.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        filterTable();
+                    }
+                });
+            });
+            
+            // Try WebSocket first
+            initWebSocket();
+            
+            // Fallback to REST API only if WebSocket fails after 3 seconds
+            setTimeout(() => {
+                if (!dataLoaded) {
+                    console.log('WebSocket timeout, trying API fallback...');
+                    loadCommentsViaAPI();
+                }
+            }, 3000);
+            
+            // Check URL hash for video filtering
+            if (window.location.hash) {
+                const videoId = window.location.hash.substring(1);
+                if (videoId) {
+                    setTimeout(() => {
+                        document.getElementById('filter-video').value = videoId;
+                        filterTable();
+                        document.getElementById('filter-video').scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }, 1000);
+                }
+            }
+        }
+        
+        function initWebSocketStatus() {
+            const indicator = document.querySelector('.ws-indicator');
+            const statusText = document.querySelector('.ws-status-text');
+            const activeUsersCount = document.querySelector('.active-users-count');
+            
+            // This will be handled by the main WebSocket connection
+        }
+        
+        function initWebSocket() {
+            try {
+                socket = io();
+                
+                socket.on('connect', function() {
+                    console.log('WebSocket connected');
+                    const indicator = document.querySelector('.ws-indicator');
+                    const statusText = document.querySelector('.ws-status-text');
+                    indicator.classList.add('connected');
+                    statusText.textContent = 'Connected';
+                    
+                    socket.emit('join_project', { project: projectName });
+                });
+                
+                socket.on('disconnect', function() {
+                    console.log('WebSocket disconnected');
+                    const indicator = document.querySelector('.ws-indicator');
+                    const statusText = document.querySelector('.ws-status-text');
+                    indicator.classList.remove('connected');
+                    statusText.textContent = 'Disconnected';
+                });
+                
+                socket.on('project_data', function(data) {
+                    console.log('🔍 DEBUG: Received project data via WebSocket:', data);
+                    if (data.project === projectName && !dataLoaded) {
+                        console.log('🔍 DEBUG: Processing project data for:', projectName);
+                        console.log('🔍 DEBUG: Comments data:', data.comments);
+                        console.log('🔍 DEBUG: Comments with is_reported=true:', data.comments.filter(c => c.is_reported));
+                        
+                        dataLoaded = true; // Mark as loaded
+                        displayComments(data.comments || []);
+                        updateNavLinks(data);
+                    } else if (dataLoaded) {
+                        console.log('🔍 DEBUG: Data already loaded, ignoring duplicate project_data');
+                    } else {
+                        console.log('🔍 DEBUG: Project name mismatch:', data.project, 'vs', projectName);
+                    }
+                });
+                
+                socket.on('report_updated', function(data) {
+                    if (data.project === projectName && data.item_type === 'comment') {
+                        console.log('Report updated from server:', data);
+                        updateReportCheckbox(data.item_id, data.checked);
+                    }
+                });
+                
+                socket.on('reports_cleared', function(data) {
+                    if (data.project === projectName && data.item_type === 'comment') {
+                        console.log('All reports cleared from server');
+                        // Clear local state
+                        reportedItems.clear();
+                        document.querySelectorAll('tbody tr').forEach(row => {
+                            const checkbox = row.querySelector('.report-checkbox');
+                            checkbox.checked = false;
+                            row.classList.remove('reported');
+                        });
+                        updateReportCount();
+                    }
+                });
+                
+                socket.on('user_count_update', function(data) {
+                    const activeUsersCount = document.querySelector('.active-users-count');
+                    activeUsersCount.textContent = data.count || 0;
+                });
+                
+                socket.on('connect_error', function(error) {
+                    console.error('WebSocket error:', error);
+                    const statusText = document.querySelector('.ws-status-text');
+                    statusText.textContent = 'Error';
+                    loadCommentsViaAPI();
+                });
+                
+            } catch (error) {
+                console.error('WebSocket init failed:', error);
+                loadCommentsViaAPI();
+            }
+        }
+        
+        function loadCommentsViaAPI() {
+            if (dataLoaded) {
+                console.log('Data already loaded via WebSocket, skipping API call');
+                return;
+            }
+            
+            console.log('Loading comments via API...');
+            
+            fetch(`/api/project/${projectName}/comments`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('API response:', data);
+                    if (!dataLoaded) {
+                        dataLoaded = true;
+                        displayComments(data.comments || []);
+                    } else {
+                        console.log('Data already loaded, ignoring API response');
+                    }
+                })
+                .catch(error => {
+                    console.error('API error:', error);
+                    if (!dataLoaded) {
+                        showError(`Failed to load comments: ${error.message}`);
+                    }
+                });
+        }
+        
+        function displayComments(comments) {
+            console.log('🔍 DEBUG: displayComments called with', comments.length, 'comments');
+            console.log('🔍 DEBUG: Comments with is_reported=true:', comments.filter(c => c.is_reported));
+            
+            allComments = comments;
+            
+            const loading = document.getElementById('loading');
+            const container = document.getElementById('content-container');
+            
+            loading.style.display = 'none';
+            container.style.display = 'block';
+            
+            // Update stats
+            updateStats(comments);
+            
+            // Render table
+            renderTable(comments);
+            
+            // Load reports AFTER rendering the table
+            loadReportedItemsFromServer(comments);
+            
+            clearError();
+        }
+        
+        function loadReportedItemsFromServer(comments) {
+            // Load report state from server data
+            console.log('🔍 DEBUG: Loading reported items from server data');
+            console.log('🔍 DEBUG: Total comments received:', comments.length);
+            console.log('🔍 DEBUG: Comments with is_reported flag:', comments.filter(c => c.is_reported));
+            
+            reportedItems.clear();
+            let reportedCount = 0;
+            
+            comments.forEach((comment) => {
+                console.log(`🔍 DEBUG: Comment ID=${comment.id}, is_reported=${comment.is_reported}, video=${comment.video_id}`);
+                
+                if (comment.is_reported) {
+                    // KEY CHANGE: Use the database ID directly
+                    const itemId = comment.id.toString();
+                    reportedItems.add(itemId);
+                    reportedCount++;
+                    console.log('🔍 DEBUG: Added reported item:', itemId, 'for comment ID:', comment.id);
+                }
+            });
+            
+            console.log('🔍 DEBUG: Loaded reported items:', reportedItems.size, 'items');
+            console.log('🔍 DEBUG: Should mark', reportedCount, 'checkboxes');
+            
+            // Apply visual state AFTER rendering the table
+            setTimeout(() => {
+                applyReportedStatus();
+                updateReportCount();
+            }, 100);
+        }
+        
+        function updateStats(comments) {
+            const categories = new Set();
+            comments.forEach(comment => {
+                if (comment.categories) {
+                    comment.categories.split(',').forEach(cat => {
+                        categories.add(cat.trim());
+                    });
+                }
+            });
+            
+            document.getElementById('total-count').textContent = comments.length;
+            document.getElementById('categories-list').textContent = 
+                categories.size > 0 ? Array.from(categories).join(', ') : 'None';
+            document.getElementById('totalItems').textContent = comments.length;
+        }
+        
+        function updateNavLinks(data) {
+            const hasVideos = data.videos && data.videos.length > 0;
+            const hasSubtitles = data.subtitles && data.subtitles.length > 0;
+            
+            if (!hasVideos) {
+                document.getElementById('videos-link').classList.add('disabled');
+                document.getElementById('videos-link').href = '#';
+            }
+            
+            if (!hasSubtitles) {
+                document.getElementById('subtitles-link').classList.add('disabled');
+                document.getElementById('subtitles-link').href = '#';
+            }
+        }
+        
+        function renderTable(comments) {
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = '';
+            
+            comments.forEach((comment, index) => {
+                const row = createCommentRow(comment, index);
+                tbody.appendChild(row);
+            });
+        }
+        
+        function createCommentRow(comment, index) {
+            const row = document.createElement('tr');
+            // KEY CHANGE: Use the database ID directly
+            const itemId = comment.id.toString();
+            
+            row.setAttribute('data-row-id', index);
+            row.setAttribute('data-item-id', itemId);
+            row.setAttribute('data-db-id', comment.id);
+            
+            const categories = comment.categories ? 
+                comment.categories.split(',').map(c => `<span class="category-tag">${c.trim()}</span>`).join('') :
+                '';
+            
+            const authorAvatar = comment.author_thumbnail ? 
+                `<img class="author-thumbnail" src="${comment.author_thumbnail}" alt="Author avatar" onerror="this.style.display='none';">` :
+                '';
+            
+            row.innerHTML = `
+                <td style="text-align: center;">
+                    <input type="checkbox" class="report-checkbox" onchange="toggleReport(${index})">
+                </td>
+                <td style="text-align: center;">
+                    <img class="thumbnail" src="/thumbnails/${comment.video_id}.jpg" alt="Thumbnail" 
+                         onerror="this.src='https://img.youtube.com/vi/${comment.video_id}/mqdefault.jpg'">
+                    <br><small><strong>${comment.video_id}</strong></small>
+                </td>
+                <td>
+                    <div class="author-info">
+                        ${authorAvatar}
+                        <span class="author-name">${comment.author || 'Anonymous'}</span>
+                    </div>
+                </td>
+                <td>
+                    <div class="comment-text">${comment.text}</div>
+                </td>
+                <td>${categories}</td>
+                <td style="text-align: center;">
+                    ${comment.youtube_url ? 
+                        `<a href="${comment.youtube_url}" target="_blank" class="watch-btn">▶️ View</a>` :
+                        '<span style="color: #999;">N/A</span>'
+                    }
+                </td>
+            `;
+            
+            return row;
+        }
+        
+        function applyReportedStatus() {
+            console.log('🔍 DEBUG: Applying reported status to table rows...');
+            console.log('🔍 DEBUG: reportedItems set contains:', Array.from(reportedItems));
+            
+            let appliedCount = 0;
+            let totalRows = 0;
+            
+            document.querySelectorAll('tbody tr').forEach((row) => {
+                totalRows++;
+                const itemId = row.getAttribute('data-item-id');
+                const checkbox = row.querySelector('.report-checkbox');
+                
+                console.log(`🔍 DEBUG: Row ${totalRows}: itemId="${itemId}", has checkbox=${!!checkbox}`);
+                
+                if (reportedItems.has(itemId)) {
+                    row.classList.add('reported');
+                    if (checkbox) {
+                        checkbox.checked = true;
+                        appliedCount++;
+                        console.log('🔍 DEBUG: ✅ Applied reported status to:', itemId);
+                    }
+                } else {
+                    row.classList.remove('reported');
+                    if (checkbox) {
+                        checkbox.checked = false;
+                    }
+                }
+            });
+            
+            console.log('🔍 DEBUG: Applied reported status to', appliedCount, 'of', totalRows, 'rows');
+        }
+        
+        function saveReportedItems() {
+            // We no longer save to localStorage, just update the counter
+            updateReportCount();
+        }
+        
+        function toggleReport(rowId) {
+            const row = document.querySelector(`tr[data-row-id="${rowId}"]`);
+            const checkbox = row.querySelector('.report-checkbox');
+            const dbId = parseInt(row.getAttribute('data-db-id'));
+            const itemId = dbId.toString();
+            
+            console.log('Toggling report for comment:', {
+                rowId: rowId,
+                dbId: dbId,
+                itemId: itemId,
+                checked: checkbox.checked
+            });
+            
+            // Update local state immediately for responsive UI
+            if (checkbox.checked) {
+                reportedItems.add(itemId);
+                row.classList.add('reported');
+            } else {
+                reportedItems.delete(itemId);
+                row.classList.remove('reported');
+            }
+            
+            // Send to server via WebSocket (save to SQLite)
+            if (socket && socket.connected) {
+                // Get comment data to send to server
+                const cells = row.getElementsByTagName('td');
+                const videoId = cells[1].querySelector('strong').textContent;
+                const author = cells[2].querySelector('.author-name').textContent;
+                const authorThumb = cells[2].querySelector('.author-thumbnail')?.src || '';
+                const text = cells[3].querySelector('.comment-text').textContent;
+                const categories = cells[4].textContent.trim();
+                const url = cells[5].querySelector('a')?.href || '';
+                
+                const commentData = {
+                    project: projectName,
+                    item_type: 'comment',
+                    item_id: dbId, // CHANGE: Use DB ID directly
+                    checked: checkbox.checked,
+                    // Complete item data to save in ReportedItem
+                    item_data: {
+                        id: itemId,
+                        Filename: videoId + '.comments',
+                        CommentAuthor: author,
+                        AuthorThumbnail: authorThumb,
+                        Text: text,
+                        Categories: categories,
+                        YouTubeURL: url
+                    }
+                };
+                
+                console.log('Sending report to server:', commentData);
+                socket.emit('toggle_report', commentData);
+            } else {
+                console.warn('WebSocket not connected, report not saved to server');
+            }
+            
+            saveReportedItems();
+        }
+        
+        function updateReportCheckbox(itemId, checked) {
+            // itemId here is the database ID
+            console.log('Updating report checkbox for DB ID:', itemId, 'checked:', checked);
+            
+            // CHANGE: Search directly by the data-db-id attribute
+            const row = document.querySelector(`tr[data-db-id="${itemId}"]`);
+            if (row) {
+                const checkbox = row.querySelector('.report-checkbox');
+                checkbox.checked = checked;
+                
+                const stringItemId = itemId.toString();
+                if (checked) {
+                    reportedItems.add(stringItemId);
+                    row.classList.add('reported');
+                    console.log('Added to reported items:', stringItemId);
+                } else {
+                    reportedItems.delete(stringItemId);
+                    row.classList.remove('reported');
+                    console.log('Removed from reported items:', stringItemId);
+                }
+                updateReportCount();
+            } else {
+                console.warn('Row not found for DB ID:', itemId);
+            }
+        }
+        
+        function clearAllReports() {
+            if (confirm('Are you sure you want to clear all reported items?')) {
+                // Clear local state
+                reportedItems.clear();
+                
+                document.querySelectorAll('tbody tr').forEach(row => {
+                    const checkbox = row.querySelector('.report-checkbox');
+                    checkbox.checked = false;
+                    row.classList.remove('reported');
+                });
+                
+                // Emit to WebSocket if connected (clear in SQLite)
+                if (socket && socket.connected) {
+                    console.log('Clearing all reports on server');
+                    socket.emit('clear_reports', {
+                        project: projectName,
+                        item_type: 'comment'
+                    });
+                } else {
+                    console.warn('WebSocket not connected, reports not cleared on server');
+                }
+                
+                updateReportCount();
+                console.log('All reports cleared locally and sent to server');
+            }
+        }
+        
+        function updateReportCount() {
+            const reportStatus = document.getElementById('reportStatus');
+            const reportCount = document.getElementById('reportCount');
+            
+            reportCount.textContent = reportedItems.size;
+            reportStatus.style.display = reportedItems.size > 0 ? 'block' : 'none';
+        }
+        
+        function filterTable() {
+            const filters = {
+                reported: document.getElementById('filter-reported').checked,
+                video: document.getElementById('filter-video').value.toLowerCase(),
+                author: document.getElementById('filter-author').value.toLowerCase(),
+                text: document.getElementById('filter-text').value.toLowerCase(),
+                categories: document.getElementById('filter-categories').value.toLowerCase(),
+                view: document.getElementById('filter-view').value.toLowerCase()
+            };
+            
+            const table = document.getElementById('dataTable');
+            const tbody = table.getElementsByTagName('tbody')[0];
+            const rows = tbody.getElementsByTagName('tr');
+            
+            let visibleCount = 0;
+            
+            for (let i = 0; i < rows.length; i++) {
+                const row = rows[i];
+                const cells = row.getElementsByTagName('td');
+                
+                if (cells.length === 0) continue;
+                
+                // Check reported filter
+                const itemId = row.getAttribute('data-item-id');
+                const isReported = reportedItems.has(itemId);
+                if (filters.reported && !isReported) {
+                    row.classList.add('hidden');
+                    continue;
+                }
+                
+                // Extract text content from each cell
+                const videoText = cells[1].textContent.toLowerCase();
+                const authorText = cells[2].textContent.toLowerCase();
+                const commentText = cells[3].textContent.toLowerCase();
+                const categoriesText = cells[4].textContent.toLowerCase();
+                const viewText = cells[5].textContent.toLowerCase();
+                
+                // Check if row matches all filters
+                const matchesVideo = !filters.video || videoText.includes(filters.video);
+                const matchesAuthor = !filters.author || authorText.includes(filters.author);
+                const matchesText = !filters.text || commentText.includes(filters.text);
+                const matchesCategories = !filters.categories || categoriesText.includes(filters.categories);
+                const matchesView = !filters.view || viewText.includes(filters.view);
+                
+                if (matchesVideo && matchesAuthor && matchesText && matchesCategories && matchesView) {
+                    row.classList.remove('hidden');
+                    visibleCount++;
+                } else {
+                    row.classList.add('hidden');
+                }
+            }
+            
+            updateFilterStats(visibleCount);
+        }
+        
+        function updateFilterStats(visibleCount) {
+            const filterStats = document.getElementById('filterStats');
+            const filteredCount = document.getElementById('filteredCount');
+            
+            filteredCount.textContent = visibleCount;
+            
+            // Show filter stats if any filter is active
+            const hasActiveFilter = 
+                document.getElementById('filter-reported').checked ||
+                document.getElementById('filter-video').value ||
+                document.getElementById('filter-author').value ||
+                document.getElementById('filter-text').value ||
+                document.getElementById('filter-categories').value ||
+                document.getElementById('filter-view').value;
+            
+            filterStats.style.display = hasActiveFilter ? 'block' : 'none';
+        }
+        
+        function clearAllFilters() {
+            document.getElementById('filter-reported').checked = false;
+            document.getElementById('filter-video').value = '';
+            document.getElementById('filter-author').value = '';
+            document.getElementById('filter-text').value = '';
+            document.getElementById('filter-categories').value = '';
+            document.getElementById('filter-view').value = '';
+            
+            filterTable();
+        }
+        
+        function showError(message) {
+            const container = document.getElementById('error-container');
+            container.innerHTML = `<div class="error">${message}</div>`;
+        }
+        
+        function clearError() {
+            const container = document.getElementById('error-container');
+            container.innerHTML = '';
+        }
+        
+        // Initialize
+        init();
+    </script>
+</body>
+</html>
