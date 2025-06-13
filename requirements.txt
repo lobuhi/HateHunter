@@ -1,3 +1,11 @@
-openai
-requests
-yt-dlp
+eventlet~=0.40.0
+Flask~=3.1.1
+flask-cors~=6.0.1
+Flask-SocketIO~=5.5.1
+Flask-SQLAlchemy~=3.1.1
+Jinja2~=3.1.6
+openai~=1.86.0
+python-socketio~=5.13.0
+requests~=2.32.4
+SQLAlchemy~=2.0.41
+yt-dlp~=2025.6.9

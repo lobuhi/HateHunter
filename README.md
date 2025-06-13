@@ -1,103 +1,156 @@
 <p align="center">
-  <img src="logo.png" alt="Logo" width="300"/>
+  <img src="logo.png" alt="Logo" width="200"/>
 </p>
 
-# HateHunter: Detect Hate Speech on YouTube with AI
+# HateHunter 🎯
 
-HateHunter is a command-line Python tool that scans YouTube content for hate speech using OpenAI's Moderation API. Effortlessly identify and analyze harmful content with AI-driven moderation.
+**Advanced AI-powered tool for detecting hate speech and harmful content in YouTube videos and comments**
 
-🔍 Key Features:
+HateHunter is a comprehensive analysis platform that uses OpenAI's GPT models to identify, categorize, and report hate speech, discriminatory language, and harmful content across YouTube channels and individual videos. The tool analyzes both video subtitles and comment sections, providing detailed reports with highlighted problematic content.
 
-* Detect hate speech in YouTube videos
-* Leverage OpenAI’s advanced Moderation API
-* Optionally highlight user-specified keywords
-* Manage different investigations in projects, new results will be merged.
-* Perfect for researchers, moderators, and developers seeking automated content analysis. 🚀
+<p align="center">
+  <img src="hatehunter_demo.jpg" alt="Logo" width="400"/>
+</p>
 
-#YouTube #AI #HateSpeechDetection #ContentModeration #Python #OpenAI
+## ✨ Features
 
-## Installation
+### 🔍 **Multi-Source Analysis**
+- **Video Subtitles**: Analyzes transcripts and auto-generated captions
+- **Comments Section**: Scans through video comments and replies
+- **Channel-wide Analysis**: Process entire YouTube channels automatically
+- **Individual Video Processing**: Target specific videos for detailed analysis
 
-1. **Clone the repository:**
+### 🤖 **AI-Powered Detection**
+- **OpenAI GPT Integration**: Leverages advanced language models for accurate detection
+- **Keyword Filtering**: Focus analysis on specific terms or topics
+
+### 📊 **Comprehensive Reporting**
+- **Interactive Web Dashboard**: Modern, responsive interface
+- **Detailed HTML Reports**: Exportable reports with highlighted content
+- **Timestamp Links**: Direct links to problematic content
+' **Real-time Team Collaboration**: Live updates when multiple users work on the platform
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Python 3.8+
+- OpenAI API key
+- Yt-dlp (for Youtube API interactions)
+
+### Installation
+
+1. **Clone the repository**
    ```bash
-   git clone https://github.com/lobuhi/HateHunter.git
-   cd HateHunter
+   git clone https://github.com/lobuhi/hatehunter.git
+   cd hatehunter
    ```
-2. Install dependencies:
+
+2. **Install dependencies**
    ```bash
    pip install -r requirements.txt
    ```
-3. Ensure yt-dlp is installed:
+
+3. **Start the application**
    ```bash
-   pip install yt-dlp
+   python server.py
    ```
-   (Alternatively, follow the [yt-dlp GitHub](https://github.com/yt-dlp/yt-dlp) instructions.)
 
-## Usage
+4. **Open your browser**
+   Navigate to `http://localhost:1337`
 
-You can run the tool in two modes: processing one or more individual videos or an entire channel. Results are merged into project files (JSON and HTML).
-If a video has already been processed (its ID is found in the project file), the tool will exit without reprocessing it.
+### Basic Usage
 
-## Command-Line Options
+1. **Create a New Project**
+   - Click "New Project" and enter a project name
+   - Projects help organize your analyses
 
-Command‑Line Options
-The tool provides a number of command‑line options to customize its behavior. Here’s an overview of each option:
+2. **Add New Video To Analyse**
+   - **Single Videos**: Add individual YouTube URLs
+   - **Channel Mode**: Analyze entire YouTube channels
+   - Enter your OpenAI API key in the analysis form
 
-`--channel <URL>`
-Process an entire YouTube channel by providing its URL. This option is mutually exclusive with --video.
+3. **Configure Settings**
+   - Choose rate limiting to respect API quotas
+   - Enable/disable subtitle and comment analysis
+   - Add optional keyword filters
 
-`--video <URL> [URL ...]`
-Process one or more individual YouTube videos by specifying their URLs. Multiple URLs can be provided (separated by spaces). This option is mutually exclusive with --channel.
+4. **Start Analysis**
+   - Click "Add to Queue" to begin processing
+   - Monitor progress in real-time
+   - View results as they become available
 
-`--language <lang>`
-Specify the language code for subtitles. For example, use es for Spanish or en for English. Defaults to en if not specified.
+## 📋 Command Line Usage
 
-`--openai-api-key <KEY>`
-Provide your OpenAI API key. The tool will first check if the environment variable OPENAI_API_KEY is set and use that. If not, it will use the value provided here. If neither is provided, the tool will prompt you to enter your API key.
+HateHunter also supports direct command-line execution:
 
-`--threshold <seconds>`
-Set the time threshold (in seconds) used for grouping subtitle blocks during conversion. The default is 30 seconds.
-
-`--skip-convert`
-If this flag is set, the tool will skip converting the downloaded SRT files into the simplified .s30 format.
-
-`--skip-analyze`
-If this flag is set, the tool will skip the analysis step that uses the OpenAI Moderation API, so it just will download the subtitles.
-
-`--keywords or -k "<keyword1, keyword2, ...>"`
-Provide a comma-separated list of keywords. The tool will filter and highlight lines containing any of these keywords in the final HTML report. For example:
-`-k "jew, muslim, black, immigration"`
-If omitted, all lines are processed without keyword-based filtering or highlighting.
-
-`--project or -p <project_name>`
-Define the project name to be used as the base for the output JSON and HTML files (e.g., `hatespeech` will produce `hatespeech.json` and `hatespeech.html`).
-
-* **First Run**: A new project file is created.
-* **Subsequent Runs**: The tool will check if a video has already been processed (based on its video ID) and exit if duplicates are detected; otherwise, it appends new, unique results to the existing files.
-These options allow you to tailor the tool's behavior to your needs, whether you’re processing individual videos, an entire channel, or merging analyses over time.
-
-### Example 1: Process a single video
 ```bash
-python3 hatehunter.py --openai-api-key <YOUR_API_KEY> --language es --video https://www.youtube.com/watch?v=VIDEO_ID -k "term1, term2, term3" -p projectname
+# Analyze a single video
+python hatehunter.py --project "my_project" --video "https://youtube.com/watch?v=VIDEO_ID" --openai-api-key "your_key"
+
+# Analyze a channel
+python hatehunter.py --project "my_project" --channel "https://youtube.com/@channel" --openai-api-key "your_key"
+
+# With custom settings
+python hatehunter.py \
+  --project "my_project" \
+  --video "https://youtube.com/watch?v=VIDEO_ID" \
+  --openai-api-key "your_key" \
+  --threshold 30 \
+  --rate-limit 2 \
+  --keywords "specific,terms,to,focus" \
+  --comments \
+  --language en
 ```
 
-### Example 2: Process multiple videos
-```bash
-python3 hatehunter.py --openai-api-key <YOUR_API_KEY> --language es --video https://www.youtube.com/watch?v=VIDEO_ID --video https://www.youtube.com/watch?v=VIDEO_ID2 --video https://www.youtube.com/watch?v=VIDEO_ID3 -k "term1, term2, term3" -p projectname
-```
+### Command Line Options
 
-### Example 3: Process an entire channel
-```bash
-export OPENAI_API_KEY=<YOUR API KEY>
-python3 hatehunter.py --language en --channel https://www.youtube.com/c/ChannelName -p projectname
-```
-## Requirements
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--project` | Project name for organization | Required |
+| `--video` | Single YouTube video URL | - |
+| `--channel` | YouTube channel URL | - |
+| `--openai-api-key` | OpenAI API key | Required |
+| `--threshold` | Chunk of seconds to analyse | 30 |
+| `--rate-limit` | Delay between API calls (seconds) | 1 |
+| `--keywords` | Comma-separated keywords to focus on | - |
+| `--comments` | Enable comment analysis | False |
+| `--language` | Content language | en |
+| `--update-ytdlp` | Update yt-dlp before processing | False |
+| `--skip-convert` | Skip video conversion step | False |
+| `--skip-analyze` | Skip AI analysis (extract only) | False |
 
-* Python 3.6+
-* yt-dlp
-* Python packages: openai, requests
-* OpenAI API Key
+## 🏗️ Architecture
+
+### Web Application
+- **Flask Backend**: RESTful API for processing and data management
+- **Frontend**: HTML5, CSS3, and vanilla JavaScript
+- **Real-time Updates**: Live progress tracking and notifications through websockets
+
+### Core Components
+- **Video Data Processor**: Handles YouTube Auto-Generated Subtitles and Comments
+- **AI Analyzer**: Integrates with OpenAI's `omni-moderation-latest` model for content analysis
+- **Report Generator**: Creates detailed HTML reports
+- **Project Manager**: Organizes analyses and data storage
+
+### Data Storage
+- **SQLite Database**: Stores analysis results and metadata
+
+### Compliance
+- **YouTube Terms**: Respects YouTube's API usage policies
+- **Rate Limiting**: Implements respectful request patterns
+- **Fair Use**: Analyzes content for safety research purposes
+
+### Disclaimer
+HateHunter is a detection tool, not an automated content removal system. All flagged content should be reviewed by human moderators before taking action. The tool aims to assist human judgment, not replace it.
+
+## 🙏 Acknowledgments
+
+- **OpenAI**: For providing the powerful language models
+- **yt-dlp**: For reliable YouTube video downloading
 
 ## Contributing
 
 Contributions, issues, and feature requests are welcome! Feel free to open an issue or submit a pull request. Or **[buy me a coffee.](https://buymeacoffee.com/lobuhi)**
+
+*Made with ❤️ for a safer internet*
