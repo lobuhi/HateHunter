@@ -4,6 +4,8 @@
 
 # HateHunter 🎯
 
+[AI Calls It Hate, But We Just Call It Content: A Vibecoded Tool Against Normalized Digital Hate Speech](https://lobuhisec.medium.com/ai-calls-it-hate-but-we-just-call-it-content-a-vibecoded-tool-against-normalized-digital-hate-2d03449e9aa7)
+
 **Advanced AI-powered tool for detecting hate speech and harmful content in YouTube videos and comments**
 
 HateHunter is a comprehensive analysis platform that uses OpenAI's GPT models to identify, categorize, and report hate speech, discriminatory language, and harmful content across YouTube channels and individual videos. The tool analyzes both video subtitles and comment sections, providing detailed reports with highlighted problematic content.
