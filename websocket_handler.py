@@ -4,7 +4,7 @@ from datetime import datetime
 from flask_socketio import emit, join_room, leave_room
 from sqlalchemy.orm import joinedload
 from database import db
-from models import Project, Video, SubtitleFlag, CommentFlag, ReportedItem, ActiveUser, VideoQueue
+from models import Project, Video, Subtitle, SubtitleFlag, CommentFlag, ReportedItem, ActiveUser, VideoQueue
 
 logger = logging.getLogger(__name__)
 
@@ -328,30 +328,31 @@ class WebSocketHandler:
                     'processing_error': video.processing_error
                 })
 
-            # Prepare subtitles data
-            subtitles = session.query(SubtitleFlag).join(Video).filter(
-                SubtitleFlag.project_id == project.id
+            # Prepare subtitles data - NOW FROM Subtitle table (all subtitles)
+            subtitles = session.query(Subtitle).join(Video).filter(
+                Subtitle.project_id == project.id
             ).all()
-            
+
             subtitles_data = []
             reported_subtitles_count = 0
-            for flag in subtitles:
-                is_reported = flag.id in reported_subtitles
+            for subtitle in subtitles:
+                is_reported = subtitle.id in reported_subtitles
                 if is_reported:
                     reported_subtitles_count += 1
-                    logger.info(f"🔍 DEBUG: Subtitle ID {flag.id} is marked as reported")
-                
+                    logger.info(f"🔍 DEBUG: Subtitle ID {subtitle.id} is marked as reported")
+
                 subtitles_data.append({
-                    'id': flag.id,
-                    'video_id': flag.video.video_id,
-                    'timestamp': flag.timestamp,
-                    'text': flag.text or "",
-                    'categories': flag.categories or "",
-                    'youtube_url': flag.youtube_url or "",
-                    'is_reported': is_reported  # Campo agregado
+                    'id': subtitle.id,
+                    'video_id': subtitle.video.video_id,
+                    'timestamp': subtitle.timestamp,
+                    'text': subtitle.text or "",
+                    'categories': subtitle.categories or "",  # Empty if not flagged
+                    'youtube_url': subtitle.youtube_url or "",
+                    'is_reported': is_reported,
+                    'is_flagged': subtitle.is_flagged  # NEW: Indicates if it contains hate speech
                 })
 
-            logger.info(f"🔍 DEBUG: Sending {len(subtitles_data)} subtitles, {reported_subtitles_count} marked as reported")
+            logger.info(f"🔍 DEBUG: Sending {len(subtitles_data)} total subtitles, {reported_subtitles_count} marked as reported")
 
             # Prepare comments data
             comments = session.query(CommentFlag).join(Video).filter(

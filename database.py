@@ -66,24 +66,32 @@ class Database:
         try:
             session = self.get_session()
             # Intentar una consulta simple para verificar las tablas
-            from models import Project, Video, SubtitleFlag, CommentFlag, VideoQueue
-            
+            from models import Project, Video, Subtitle, SubtitleFlag, CommentFlag, VideoQueue
+
             # Verificar tabla projects
             session.query(Project).count()
             logger.info("✅ Projects table verified")
-            
+
             # Verificar tabla videos
             session.query(Video).count()
             logger.info("✅ Videos table verified")
-            
+
+            # Verificar tabla subtitles (nueva)
+            try:
+                session.query(Subtitle).count()
+                logger.info("✅ Subtitles table verified")
+            except Exception as subtitle_error:
+                logger.warning(f"Subtitles table verification failed (this is normal for existing databases): {subtitle_error}")
+                # La tabla se creará automáticamente en la siguiente operación
+
             # Verificar tabla subtitle_flags
             session.query(SubtitleFlag).count()
             logger.info("✅ SubtitleFlags table verified")
-            
+
             # Verificar tabla comment_flags
             session.query(CommentFlag).count()
             logger.info("✅ CommentFlags table verified")
-            
+
             # Verificar tabla video_queue (nueva)
             try:
                 session.query(VideoQueue).count()
@@ -91,10 +99,10 @@ class Database:
             except Exception as queue_error:
                 logger.warning(f"VideoQueue table verification failed (this is normal for existing databases): {queue_error}")
                 # La tabla se creará automáticamente en la siguiente operación
-            
+
             session.close()
             logger.info("Database structure verification completed successfully")
-            
+
         except Exception as e:
             logger.error(f"Database verification failed: {e}")
             # No re-lanzar la excepción aquí, solo log
@@ -122,7 +130,7 @@ class Database:
         """Perform database migrations for new features"""
         try:
             logger.info("🔄 Checking for database migrations...")
-            
+
             # Check if VideoQueue table exists
             session = self.get_session()
             try:
@@ -136,10 +144,25 @@ class Database:
                 logger.info("✅ VideoQueue table created successfully")
             finally:
                 session.close()
-                
+
+            # Check if Subtitle table exists
+            session = self.get_session()
+            try:
+                from models import Subtitle
+                session.query(Subtitle).count()
+                logger.info("✅ Subtitle table already exists")
+            except Exception:
+                logger.info("🔧 Subtitle table doesn't exist, creating...")
+                # Create the new table
+                from models import Subtitle
+                Subtitle.__table__.create(self.engine, checkfirst=True)
+                logger.info("✅ Subtitle table created successfully")
+            finally:
+                session.close()
+
             # Add any future migrations here
             logger.info("✅ Database migrations completed")
-            
+
         except Exception as e:
             logger.error(f"Error during database migration: {e}")
             raise
@@ -152,28 +175,35 @@ def debug_database():
     """Función para debug de la base de datos"""
     session = db.get_session()
     try:
-        from models import Project, Video, SubtitleFlag, CommentFlag, VideoQueue
-        
+        from models import Project, Video, Subtitle, SubtitleFlag, CommentFlag, VideoQueue
+
         print("\n=== DATABASE DEBUG INFO ===")
         print(f"Database path: {db.db_path}")
         print(f"Database exists: {os.path.exists(db.db_path)}")
-        
+
         if os.path.exists(db.db_path):
             print(f"Database size: {os.path.getsize(db.db_path)} bytes")
-        
+
         # Contar registros
         projects_count = session.query(Project).count()
         videos_count = session.query(Video).count()
+
+        try:
+            all_subtitles_count = session.query(Subtitle).count()
+        except Exception:
+            all_subtitles_count = "N/A (table not created yet)"
+
         subtitles_count = session.query(SubtitleFlag).count()
         comments_count = session.query(CommentFlag).count()
-        
+
         try:
             queue_count = session.query(VideoQueue).count()
         except Exception:
             queue_count = "N/A (table not created yet)"
-        
+
         print(f"Projects: {projects_count}")
         print(f"Videos: {videos_count}")
+        print(f"All subtitles: {all_subtitles_count}")
         print(f"Subtitle flags: {subtitles_count}")
         print(f"Comment flags: {comments_count}")
         print(f"Queue items: {queue_count}")
@@ -183,16 +213,23 @@ def debug_database():
         for project in projects:
             print(f"\nProject: {project.name} (ID: {project.id})")
             project_videos = session.query(Video).filter_by(project_id=project.id).count()
+
+            try:
+                project_all_subtitles = session.query(Subtitle).filter_by(project_id=project.id).count()
+            except Exception:
+                project_all_subtitles = "N/A"
+
             project_subtitles = session.query(SubtitleFlag).filter_by(project_id=project.id).count()
             project_comments = session.query(CommentFlag).filter_by(project_id=project.id).count()
-            
+
             try:
                 project_queue = session.query(VideoQueue).filter_by(project_id=project.id).count()
             except Exception:
                 project_queue = "N/A"
-                
+
             print(f"  - Videos: {project_videos}")
-            print(f"  - Subtitles: {project_subtitles}")
+            print(f"  - All subtitles: {project_all_subtitles}")
+            print(f"  - Subtitle flags: {project_subtitles}")
             print(f"  - Comments: {project_comments}")
             print(f"  - Queue items: {project_queue}")
         

@@ -30,18 +30,42 @@
         
         <div id="content-container" style="display: none;">
             <div class="stats" id="stats">
-                <strong>Total flagged subtitle segments:</strong> <span id="total-count">0</span><br>
+                <strong>Total subtitle segments:</strong> <span id="total-count">0</span><br>
                 <strong>Categories found:</strong> <span id="categories-list">None</span><br>
                 <strong>Generated on:</strong> <span id="timestamp"></span>
             </div>
-            
+
             <div class="filter-stats" id="filterStats">
-                <strong>Filtered results:</strong> <span id="filteredCount">0</span> / <span id="totalItems">0</span> items shown
+                <strong>Showing:</strong> <span id="filteredCount">0</span> results (Page <span id="currentPage">1</span> of <span id="totalPages">1</span>)
             </div>
-            
+
             <div class="controls">
+                <label style="margin-right: 15px;">
+                    <input type="checkbox" id="filter-flagged" onchange="applyFilters()">
+                    <span style="font-weight: 500;">Show only flagged</span>
+                </label>
                 <button class="clear-filters" onclick="clearAllFilters()">Clear All Filters</button>
                 <button class="clear-reports" onclick="clearAllReports()">Clear All Reports</button>
+                <button onclick="applyFilters()" style="background: #3b82f6;">🔍 Search</button>
+            </div>
+
+            <div class="pagination-controls" style="margin: 15px 0; text-align: center;">
+                <button onclick="goToPage(1)" id="firstPageBtn">⏮️ First</button>
+                <button onclick="goToPage(currentPage - 1)" id="prevPageBtn">◀️ Previous</button>
+                <span style="margin: 0 15px;">
+                    Page <input type="number" id="pageInput" value="1" min="1" style="width: 60px; text-align: center;" onchange="goToPageInput()"> of <span id="totalPagesBottom">1</span>
+                </span>
+                <button onclick="goToPage(currentPage + 1)" id="nextPageBtn">Next ▶️</button>
+                <button onclick="goToPage(totalPages)" id="lastPageBtn">Last ⏭️</button>
+                <span style="margin-left: 20px;">
+                    Per page:
+                    <select id="perPageSelect" onchange="changePerPage()" style="padding: 5px;">
+                        <option value="25">25</option>
+                        <option value="50" selected>50</option>
+                        <option value="100">100</option>
+                        <option value="200">200</option>
+                    </select>
+                </span>
             </div>
             
             <table id="dataTable">
@@ -56,28 +80,38 @@
                     </tr>
                     <tr class="filter-row">
                         <th>
-                            <input type="checkbox" id="filter-reported" onchange="filterTable()" title="Show only reported">
+                            <input type="checkbox" id="filter-reported" title="Show only reported">
                         </th>
                         <th>
-                            <input type="text" class="filter-input" id="filter-video" placeholder="Filter video ID..." onkeyup="filterTable()">
+                            <input type="text" class="filter-input" id="filter-video" placeholder="Filter video ID...">
                         </th>
                         <th>
-                            <input type="text" class="filter-input" id="filter-timestamp" placeholder="Filter time..." onkeyup="filterTable()">
+                            <input type="text" class="filter-input" id="filter-timestamp" placeholder="Filter time...">
                         </th>
                         <th>
-                            <input type="text" class="filter-input" id="filter-text" placeholder="Filter text..." onkeyup="filterTable()">
+                            <input type="text" class="filter-input" id="filter-text" placeholder="Filter text...">
                         </th>
                         <th>
-                            <input type="text" class="filter-input" id="filter-categories" placeholder="Filter categories..." onkeyup="filterTable()">
+                            <input type="text" class="filter-input" id="filter-categories" placeholder="Filter categories...">
                         </th>
                         <th>
-                            <input type="text" class="filter-input" id="filter-watch" placeholder="Filter status..." onkeyup="filterTable()">
+                            <input type="text" class="filter-input" id="filter-watch" placeholder="Filter status...">
                         </th>
                     </tr>
                 </thead>
                 <tbody id="tableBody">
                 </tbody>
             </table>
+
+            <div class="pagination-controls" style="margin-top: 20px;">
+                <button onclick="goToPage(1)" id="firstPageBtn2">⏮️ First</button>
+                <button onclick="goToPage(currentPage - 1)" id="prevPageBtn2">◀️ Previous</button>
+                <span style="margin: 0 15px;">
+                    Page <span id="currentPage2">1</span> of <span id="totalPages2">1</span>
+                </span>
+                <button onclick="goToPage(currentPage + 1)" id="nextPageBtn2">Next ▶️</button>
+                <button onclick="goToPage(totalPages)" id="lastPageBtn2">Last ⏭️</button>
+            </div>
         </div>
         
         <div class="report-status" id="reportStatus">
@@ -95,9 +129,14 @@
     <script>
         const projectName = '{{ project }}';
         let socket;
-        let allSubtitles = [];
         let reportedItems = new Set(); // Now we use database IDs as strings
-        
+
+        // Pagination state
+        let currentPage = 1;
+        let totalPages = 1;
+        let perPage = 50;
+        let totalResults = 0;
+
         let dataLoaded = false; // Flag to avoid multiple loads
         
         function init() {
@@ -112,21 +151,16 @@
             filterInputs.forEach(input => {
                 input.addEventListener('keypress', function(e) {
                     if (e.key === 'Enter') {
-                        filterTable();
+                        applyFilters();
                     }
                 });
             });
             
-            // Try WebSocket first
+            // Load data via REST API with pagination
+            loadSubtitlesViaAPI(currentPage);
+
+            // Initialize WebSocket for real-time updates
             initWebSocket();
-            
-            // Fallback to REST API only if WebSocket fails after 3 seconds
-            setTimeout(() => {
-                if (!dataLoaded) {
-                    console.log('WebSocket timeout, trying API fallback...');
-                    loadSubtitlesViaAPI();
-                }
-            }, 3000);
             
             // Check URL hash for video filtering
             if (window.location.hash) {
@@ -134,9 +168,9 @@
                 if (videoId) {
                     setTimeout(() => {
                         document.getElementById('filter-video').value = videoId;
-                        filterTable();
+                        applyFilters();
                         document.getElementById('filter-video').scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }, 1000);
+                    }, 500);
                 }
             }
         }
@@ -173,18 +207,10 @@
                 
                 socket.on('project_data', function(data) {
                     console.log('🔍 DEBUG: Received project data via WebSocket:', data);
-                    if (data.project === projectName && !dataLoaded) {
-                        console.log('🔍 DEBUG: Processing project data for:', projectName);
-                        console.log('🔍 DEBUG: Subtitles data:', data.subtitles);
-                        console.log('🔍 DEBUG: Subtitles with is_reported=true:', data.subtitles.filter(s => s.is_reported));
-                        
-                        dataLoaded = true; // Mark as loaded
-                        displaySubtitles(data.subtitles || []);
+                    // WebSocket data is used only for real-time updates, not for initial load
+                    // Initial load uses paginated API
+                    if (data.project === projectName) {
                         updateNavLinks(data);
-                    } else if (dataLoaded) {
-                        console.log('🔍 DEBUG: Data already loaded, ignoring duplicate project_data');
-                    } else {
-                        console.log('🔍 DEBUG: Project name mismatch:', data.project, 'vs', projectName);
                     }
                 });
                 
@@ -227,15 +253,31 @@
             }
         }
         
-        function loadSubtitlesViaAPI() {
-            if (dataLoaded) {
-                console.log('Data already loaded via WebSocket, skipping API call');
-                return;
-            }
-            
-            console.log('Loading subtitles via API...');
-            
-            fetch(`/api/project/${projectName}/subtitles`)
+        function loadSubtitlesViaAPI(page = 1) {
+            console.log('Loading subtitles via API with pagination...', { page, perPage });
+
+            // Build query parameters
+            const params = new URLSearchParams({
+                page: page,
+                per_page: perPage
+            });
+
+            // Add filters if any
+            const videoFilter = document.getElementById('filter-video').value.trim();
+            const textFilter = document.getElementById('filter-text').value.trim();
+            const categoriesFilter = document.getElementById('filter-categories').value.trim();
+            const timestampFilter = document.getElementById('filter-timestamp').value.trim();
+            const reportedOnly = document.getElementById('filter-reported').checked;
+            const flaggedOnly = document.getElementById('filter-flagged').checked;
+
+            if (videoFilter) params.append('video', videoFilter);
+            if (textFilter) params.append('text', textFilter);
+            if (categoriesFilter) params.append('categories', categoriesFilter);
+            if (timestampFilter) params.append('timestamp', timestampFilter);
+            if (reportedOnly) params.append('reported', 'true');
+            if (flaggedOnly) params.append('flagged', 'true');
+
+            fetch(`/api/project/${projectName}/subtitles?${params.toString()}`)
                 .then(response => {
                     if (!response.ok) {
                         throw new Error(`HTTP ${response.status}`);
@@ -244,42 +286,41 @@
                 })
                 .then(data => {
                     console.log('API response:', data);
-                    if (!dataLoaded) {
-                        dataLoaded = true;
-                        displaySubtitles(data.subtitles || []);
-                    } else {
-                        console.log('Data already loaded, ignoring API response');
-                    }
+                    dataLoaded = true;
+
+                    // Update pagination state
+                    currentPage = data.page;
+                    totalPages = data.total_pages;
+                    totalResults = data.total;
+
+                    displaySubtitles(data.subtitles || []);
+                    updatePaginationControls();
                 })
                 .catch(error => {
                     console.error('API error:', error);
-                    if (!dataLoaded) {
-                        showError(`Failed to load subtitles: ${error.message}`);
-                    }
+                    showError(`Failed to load subtitles: ${error.message}`);
                 });
         }
         
         function displaySubtitles(subtitles) {
             console.log('🔍 DEBUG: displaySubtitles called with', subtitles.length, 'subtitles');
             console.log('🔍 DEBUG: Subtitles with is_reported=true:', subtitles.filter(s => s.is_reported));
-            
-            allSubtitles = subtitles;
-            
+
             const loading = document.getElementById('loading');
             const container = document.getElementById('content-container');
-            
+
             loading.style.display = 'none';
             container.style.display = 'block';
-            
+
             // Update stats
-            updateStats(subtitles);
-            
+            updateStats();
+
             // Render table
             renderTable(subtitles);
-            
+
             // Load reports AFTER rendering the table
             loadReportedItemsFromServer(subtitles);
-            
+
             clearError();
         }
         
@@ -314,20 +355,12 @@
             }, 100);
         }
         
-        function updateStats(subtitles) {
-            const categories = new Set();
-            subtitles.forEach(subtitle => {
-                if (subtitle.categories) {
-                    subtitle.categories.split(',').forEach(cat => {
-                        categories.add(cat.trim());
-                    });
-                }
-            });
-            
-            document.getElementById('total-count').textContent = subtitles.length;
-            document.getElementById('categories-list').textContent = 
-                categories.size > 0 ? Array.from(categories).join(', ') : 'None';
-            document.getElementById('totalItems').textContent = subtitles.length;
+        function updateStats() {
+            // Show total results from pagination
+            document.getElementById('total-count').textContent = totalResults;
+            document.getElementById('filteredCount').textContent = totalResults;
+            document.getElementById('currentPage').textContent = currentPage;
+            document.getElementById('totalPages').textContent = totalPages;
         }
         
         function updateNavLinks(data) {
@@ -359,25 +392,31 @@
             const row = document.createElement('tr');
             // KEY CHANGE: Use the database ID directly
             const itemId = subtitle.id.toString();
-            
+
             row.setAttribute('data-row-id', index);
             row.setAttribute('data-item-id', itemId);
             row.setAttribute('data-db-id', subtitle.id);
-            
-            const categories = subtitle.categories ? 
+
+            // Add visual indicator for non-flagged subtitles
+            if (!subtitle.is_flagged) {
+                row.style.backgroundColor = '#f8f9fa';  // Light gray background for non-flagged
+                row.style.opacity = '0.7';
+            }
+
+            const categories = subtitle.categories ?
                 subtitle.categories.split(',').map(c => `<span class="category-tag">${c.trim()}</span>`).join('') :
-                '';
-            
-            const timestamp = subtitle.timestamp ? 
+                (subtitle.is_flagged ? '' : '<span style="color: #28a745; font-weight: bold;">✓ Clean</span>');
+
+            const timestamp = subtitle.timestamp ?
                 `<span class="timestamp">${Math.floor(subtitle.timestamp)}s</span>` :
                 '<span style="color: #999;">N/A</span>';
-            
+
             row.innerHTML = `
                 <td style="text-align: center;">
                     <input type="checkbox" class="report-checkbox" onchange="toggleReport(${index})">
                 </td>
                 <td style="text-align: center;">
-                    <img class="thumbnail" src="/thumbnails/${subtitle.video_id}.jpg" alt="Thumbnail" 
+                    <img class="thumbnail" src="/thumbnails/${subtitle.video_id}.jpg" alt="Thumbnail"
                          onerror="this.src='https://img.youtube.com/vi/${subtitle.video_id}/mqdefault.jpg'">
                     <br><small><strong>${subtitle.video_id}</strong></small>
                 </td>
@@ -387,13 +426,13 @@
                 <td>${subtitle.text}</td>
                 <td>${categories}</td>
                 <td style="text-align: center;">
-                    ${subtitle.youtube_url ? 
+                    ${subtitle.youtube_url ?
                         `<a href="${subtitle.youtube_url}" target="_blank" class="watch-btn">▶️ Watch</a>` :
                         '<span style="color: #999;">N/A</span>'
                     }
                 </td>
             `;
-            
+
             return row;
         }
         
@@ -552,89 +591,68 @@
             reportStatus.style.display = reportedItems.size > 0 ? 'block' : 'none';
         }
         
-        function filterTable() {
-            const filters = {
-                reported: document.getElementById('filter-reported').checked,
-                video: document.getElementById('filter-video').value.toLowerCase(),
-                timestamp: document.getElementById('filter-timestamp').value.toLowerCase(),
-                text: document.getElementById('filter-text').value.toLowerCase(),
-                categories: document.getElementById('filter-categories').value.toLowerCase(),
-                watch: document.getElementById('filter-watch').value.toLowerCase()
-            };
-            
-            const table = document.getElementById('dataTable');
-            const tbody = table.getElementsByTagName('tbody')[0];
-            const rows = tbody.getElementsByTagName('tr');
-            
-            let visibleCount = 0;
-            
-            for (let i = 0; i < rows.length; i++) {
-                const row = rows[i];
-                const cells = row.getElementsByTagName('td');
-                
-                if (cells.length === 0) continue;
-                
-                // Check reported filter
-                const itemId = row.getAttribute('data-item-id');
-                const isReported = reportedItems.has(itemId);
-                if (filters.reported && !isReported) {
-                    row.classList.add('hidden');
-                    continue;
-                }
-                
-                // Extract text content from each cell
-                const videoText = cells[1].textContent.toLowerCase();
-                const timestampText = cells[2].textContent.toLowerCase();
-                const subtitleText = cells[3].textContent.toLowerCase();
-                const categoriesText = cells[4].textContent.toLowerCase();
-                const watchText = cells[5].textContent.toLowerCase();
-                
-                // Check if row matches all filters
-                const matchesVideo = !filters.video || videoText.includes(filters.video);
-                const matchesTimestamp = !filters.timestamp || timestampText.includes(filters.timestamp);
-                const matchesText = !filters.text || subtitleText.includes(filters.text);
-                const matchesCategories = !filters.categories || categoriesText.includes(filters.categories);
-                const matchesWatch = !filters.watch || watchText.includes(filters.watch);
-                
-                if (matchesVideo && matchesTimestamp && matchesText && matchesCategories && matchesWatch) {
-                    row.classList.remove('hidden');
-                    visibleCount++;
-                } else {
-                    row.classList.add('hidden');
-                }
-            }
-            
-            updateFilterStats(visibleCount);
+        // New pagination functions
+        function applyFilters() {
+            // Reset to page 1 when applying filters
+            currentPage = 1;
+            loadSubtitlesViaAPI(currentPage);
         }
-        
-        function updateFilterStats(visibleCount) {
-            const filterStats = document.getElementById('filterStats');
-            const filteredCount = document.getElementById('filteredCount');
-            
-            filteredCount.textContent = visibleCount;
-            
-            // Show filter stats if any filter is active
-            const hasActiveFilter = 
-                document.getElementById('filter-reported').checked ||
-                document.getElementById('filter-video').value ||
-                document.getElementById('filter-timestamp').value ||
-                document.getElementById('filter-text').value ||
-                document.getElementById('filter-categories').value ||
-                document.getElementById('filter-watch').value;
-            
-            filterStats.style.display = hasActiveFilter ? 'block' : 'none';
+
+        function goToPage(page) {
+            if (page < 1 || page > totalPages) return;
+            currentPage = page;
+            loadSubtitlesViaAPI(currentPage);
+        }
+
+        function goToPageInput() {
+            const pageInput = document.getElementById('pageInput');
+            const page = parseInt(pageInput.value);
+            if (!isNaN(page)) {
+                goToPage(page);
+            }
+        }
+
+        function changePerPage() {
+            perPage = parseInt(document.getElementById('perPageSelect').value);
+            currentPage = 1; // Reset to first page
+            loadSubtitlesViaAPI(currentPage);
+        }
+
+        function updatePaginationControls() {
+            // Update page display
+            document.getElementById('currentPage').textContent = currentPage;
+            document.getElementById('totalPages').textContent = totalPages;
+            document.getElementById('totalPagesBottom').textContent = totalPages;
+            document.getElementById('currentPage2').textContent = currentPage;
+            document.getElementById('totalPages2').textContent = totalPages;
+            document.getElementById('pageInput').value = currentPage;
+            document.getElementById('pageInput').max = totalPages;
+
+            // Enable/disable buttons (top)
+            document.getElementById('firstPageBtn').disabled = currentPage === 1;
+            document.getElementById('prevPageBtn').disabled = currentPage === 1;
+            document.getElementById('nextPageBtn').disabled = currentPage === totalPages;
+            document.getElementById('lastPageBtn').disabled = currentPage === totalPages;
+
+            // Enable/disable buttons (bottom)
+            document.getElementById('firstPageBtn2').disabled = currentPage === 1;
+            document.getElementById('prevPageBtn2').disabled = currentPage === 1;
+            document.getElementById('nextPageBtn2').disabled = currentPage === totalPages;
+            document.getElementById('lastPageBtn2').disabled = currentPage === totalPages;
         }
         
         function clearAllFilters() {
             // Clear only the filters that exist in the subtitles template
             document.getElementById('filter-reported').checked = false;
+            document.getElementById('filter-flagged').checked = false;
             document.getElementById('filter-video').value = '';
             document.getElementById('filter-timestamp').value = '';
             document.getElementById('filter-text').value = '';
             document.getElementById('filter-categories').value = '';
             document.getElementById('filter-watch').value = '';
-            
-            filterTable();
+
+            // Reload with cleared filters
+            applyFilters();
         }
         
         function showError(message) {

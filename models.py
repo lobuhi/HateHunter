@@ -15,6 +15,7 @@ class Project(Base):
     
     # Relationships
     videos = relationship('Video', back_populates='project', cascade='all, delete-orphan')
+    subtitles = relationship('Subtitle', back_populates='project', cascade='all, delete-orphan')
     subtitle_flags = relationship('SubtitleFlag', back_populates='project', cascade='all, delete-orphan')
     comment_flags = relationship('CommentFlag', back_populates='project', cascade='all, delete-orphan')
     reported_items = relationship('ReportedItem', back_populates='project', cascade='all, delete-orphan')
@@ -51,6 +52,7 @@ class Video(Base):
     
     # Relationships
     project = relationship('Project', back_populates='videos')
+    subtitles = relationship('Subtitle', back_populates='video', cascade='all, delete-orphan')
     subtitle_flags = relationship('SubtitleFlag', back_populates='video', cascade='all, delete-orphan')
     comment_flags = relationship('CommentFlag', back_populates='video', cascade='all, delete-orphan')
     queue_items = relationship('VideoQueue', back_populates='video', cascade='all, delete-orphan')
@@ -83,9 +85,28 @@ class VideoQueue(Base):
     project = relationship('Project', back_populates='video_queue')
     video = relationship('Video', back_populates='queue_items')
 
+class Subtitle(Base):
+    __tablename__ = 'subtitles'
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
+    video_id = Column(Integer, ForeignKey('videos.id'), nullable=False)
+    timestamp = Column(Float)
+    text = Column(Text)
+    youtube_url = Column(String(500))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Flag information (if flagged as hate speech)
+    is_flagged = Column(Boolean, default=False)
+    categories = Column(String(500))  # Only filled if is_flagged=True
+
+    # Relationships
+    project = relationship('Project', back_populates='subtitles')
+    video = relationship('Video', back_populates='subtitles')
+
 class SubtitleFlag(Base):
     __tablename__ = 'subtitle_flags'
-    
+
     id = Column(Integer, primary_key=True)
     project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
     video_id = Column(Integer, ForeignKey('videos.id'), nullable=False)
@@ -94,7 +115,7 @@ class SubtitleFlag(Base):
     categories = Column(String(500))
     youtube_url = Column(String(500))
     created_at = Column(DateTime, default=datetime.utcnow)
-    
+
     # Relationships
     project = relationship('Project', back_populates='subtitle_flags')
     video = relationship('Video', back_populates='subtitle_flags')

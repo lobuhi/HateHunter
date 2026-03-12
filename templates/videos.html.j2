@@ -374,6 +374,12 @@
                             <input type="number" id="threshold" value="30" min="1" max="300">
                             <small>Time threshold for grouping subtitle segments (default: 30 seconds)</small>
                         </div>
+
+                        <div class="form-group">
+                            <label for="minDuration">⏱️ Minimum Video Duration (minutes)</label>
+                            <input type="number" id="minDuration" value="0" min="0" max="1440" step="1">
+                            <small>Skip videos shorter than this duration. Use 0 to analyze all videos. Useful to filter out shorts/clips (e.g., set to 5 to skip videos under 5 minutes)</small>
+                        </div>
                     </div>
 
                     <!-- API Configuration -->
@@ -718,6 +724,7 @@
             // Capture all form values before closing modal
             formData.language = document.getElementById('language').value;
             formData.threshold = parseInt(document.getElementById('threshold').value);
+            formData.minDuration = parseInt(document.getElementById('minDuration').value) || 0;
             formData.rateLimit = parseInt(document.getElementById('rateLimit').value);
             formData.analyzeSubtitles = document.getElementById('analyzeSubtitles').checked;
             formData.analyzeComments = document.getElementById('analyzeComments').checked;
@@ -773,6 +780,7 @@
                         channel: formData.channelUrl,
                         language: formData.language,
                         threshold: formData.threshold,
+                        min_duration: formData.minDuration,
                         rate_limit: formData.rateLimit,
                         analyze_subtitles: formData.analyzeSubtitles,
                         analyze_comments: formData.analyzeComments,
@@ -835,10 +843,15 @@
             
             // Threshold
             cmd.push('--threshold', formData.threshold.toString());
-            
+
+            // Minimum duration (in minutes)
+            if (formData.minDuration && formData.minDuration > 0) {
+                cmd.push('--min-duration', formData.minDuration.toString());
+            }
+
             // Rate limit
             cmd.push('--rate-limit', formData.rateLimit.toString());
-            
+
             // OpenAI API key
             if (formData.openaiKey) {
                 cmd.push('--openai-api-key', formData.openaiKey);
@@ -848,7 +861,13 @@
             if (formData.analyzeComments) {
                 cmd.push('--comments');
             }
-            
+
+            // If user unchecked "Analyze Subtitles", save subtitles WITHOUT AI moderation
+            // We use a special flag to indicate we want to save subtitles without analyzing them
+            if (!formData.analyzeSubtitles) {
+                cmd.push('--no-moderation');  // Save all subtitles without AI moderation
+            }
+
             // Advanced options
             if (formData.updateYtdlp) {
                 cmd.push('--update-ytdlp');

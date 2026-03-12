@@ -1481,17 +1481,92 @@ def delete_project(project_name):
 
 @app.route('/api/project/<project_name>/subtitles', methods=['GET'])
 def get_project_subtitles(project_name):
-    """Get subtitles for a project"""
+    """Get subtitles for a project with pagination and filtering"""
     session = db.get_session()
     try:
         project = session.query(Project).filter_by(name=project_name).first()
         if not project:
             return jsonify({'error': 'Project not found'}), 404
-        
-        subtitles = session.query(SubtitleFlag).join(Video).filter(
-            SubtitleFlag.project_id == project.id
+
+        # Get pagination parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 50, type=int)
+
+        # Get filter parameters
+        video_filter = request.args.get('video', '').strip()
+        text_filter = request.args.get('text', '').strip()
+        categories_filter = request.args.get('categories', '').strip()
+        timestamp_filter = request.args.get('timestamp', '').strip()
+        reported_only = request.args.get('reported', '').lower() == 'true'
+        flagged_only = request.args.get('flagged', '').lower() == 'true'
+
+        # Import Subtitle model
+        from models import Subtitle
+
+        # Build query - use Subtitle table which has ALL subtitles
+        query = session.query(Subtitle).join(Video).filter(
+            Subtitle.project_id == project.id
+        )
+
+        # Apply filters
+        if video_filter:
+            query = query.filter(Video.video_id.like(f'%{video_filter}%'))
+
+        if text_filter:
+            query = query.filter(Subtitle.text.like(f'%{text_filter}%'))
+
+        if categories_filter:
+            query = query.filter(Subtitle.categories.like(f'%{categories_filter}%'))
+
+        if timestamp_filter:
+            try:
+                timestamp_value = float(timestamp_filter)
+                query = query.filter(Subtitle.timestamp >= timestamp_value - 1).filter(
+                    Subtitle.timestamp <= timestamp_value + 1
+                )
+            except ValueError:
+                pass
+
+        # Filter by flagged status
+        if flagged_only:
+            query = query.filter(Subtitle.is_flagged == True)
+
+        if reported_only:
+            # Get reported subtitle IDs
+            reported_items = session.query(ReportedItem.item_id).filter_by(
+                project_id=project.id,
+                item_type='subtitle'
+            ).all()
+            reported_ids = [item.item_id for item in reported_items]
+
+            if reported_ids:
+                query = query.filter(Subtitle.id.in_(reported_ids))
+            else:
+                # If no reported items, return empty result
+                return jsonify({
+                    'project': project_name,
+                    'subtitles': [],
+                    'total': 0,
+                    'page': page,
+                    'per_page': per_page,
+                    'total_pages': 0
+                })
+
+        # Get total count before pagination
+        total = query.count()
+
+        # Apply pagination
+        subtitles = query.order_by(Subtitle.id.desc()).offset((page - 1) * per_page).limit(per_page).all()
+
+        # Get reported status for all subtitles in this page
+        subtitle_ids = [s.id for s in subtitles]
+        reported_items = session.query(ReportedItem.item_id).filter(
+            ReportedItem.project_id == project.id,
+            ReportedItem.item_type == 'subtitle',
+            ReportedItem.item_id.in_(subtitle_ids)
         ).all()
-        
+        reported_set = set(item.item_id for item in reported_items)
+
         subtitles_data = []
         for subtitle in subtitles:
             subtitles_data.append({
@@ -1499,13 +1574,21 @@ def get_project_subtitles(project_name):
                 'video_id': subtitle.video.video_id,
                 'timestamp': subtitle.timestamp,
                 'text': subtitle.text,
-                'categories': subtitle.categories,
-                'youtube_url': subtitle.youtube_url
+                'categories': subtitle.categories if subtitle.categories else '',
+                'youtube_url': subtitle.youtube_url,
+                'is_flagged': subtitle.is_flagged,
+                'is_reported': subtitle.id in reported_set
             })
-        
+
+        total_pages = (total + per_page - 1) // per_page
+
         return jsonify({
             'project': project_name,
-            'subtitles': subtitles_data
+            'subtitles': subtitles_data,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': total_pages
         })
     except Exception as e:
         logger.error(f"Error getting project subtitles: {e}")
@@ -1739,7 +1822,12 @@ def build_hatehunter_command(data):
         # Threshold
         threshold = data.get('threshold', 30)
         cmd.extend(['--threshold', str(threshold)])
-        
+
+        # Minimum duration (in minutes)
+        min_duration = data.get('min_duration', 0)
+        if min_duration and min_duration > 0:
+            cmd.extend(['--min-duration', str(min_duration)])
+
         # Rate limit
         rate_limit = data.get('rate_limit', 10)
         cmd.extend(['--rate-limit', str(rate_limit)])
@@ -1747,17 +1835,23 @@ def build_hatehunter_command(data):
         # Analysis options
         if data.get('analyze_comments'):
             cmd.append('--comments')
-        
+
+        # Check if user wants to skip AI moderation of subtitles
+        # If analyze_subtitles is False, save all subtitles without AI moderation
+        analyze_subtitles = data.get('analyze_subtitles', True)
+        if not analyze_subtitles:
+            cmd.append('--no-moderation')
+
         # Advanced options
         if data.get('update_ytdlp'):
             cmd.append('--update-ytdlp')
-        
+
         if data.get('skip_convert'):
             cmd.append('--skip-convert')
-        
+
         if data.get('skip_analyze'):
             cmd.append('--skip-analyze')
-        
+
         return cmd
         
     except Exception as e:
@@ -1972,12 +2066,12 @@ def cleanup():
 # Main execution
 if __name__ == '__main__':
     try:
-        logger.info("Starting HateHunter server on port 1337...")
-        print("🚀 Server starting on http://localhost:1337")
-        print("📊 Debug endpoint available at: http://localhost:1337/debug/db")
-        print("🔄 Queue debug endpoint: http://localhost:1337/debug/queue")
-        print("🎯 HateHunter analysis endpoint: http://localhost:1337/api/hatehunter/analyze")
-        print("📝 Queue endpoint: http://localhost:1337/api/project/{project}/queue")
+        logger.info("Starting HateHunter server on port 1338...")
+        print("🚀 Server starting on http://localhost:1338")
+        print("📊 Debug endpoint available at: http://localhost:1338/debug/db")
+        print("🔄 Queue debug endpoint: http://localhost:1338/debug/queue")
+        print("🎯 HateHunter analysis endpoint: http://localhost:1338/api/hatehunter/analyze")
+        print("📝 Queue endpoint: http://localhost:1338/api/project/{project}/queue")
         
         # Start the queue processor
         queue_manager.start_queue_processor()
@@ -1985,7 +2079,7 @@ if __name__ == '__main__':
         socketio.run(
             app, 
             host='0.0.0.0', 
-            port=1337,
+            port=1338,
             debug=False,
             use_reloader=False
         )

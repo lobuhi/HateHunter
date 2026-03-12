@@ -18,7 +18,7 @@ from datetime import datetime
 
 # Importar las nuevas dependencias para SQLite
 from database import db
-from models import Project, Video, SubtitleFlag, CommentFlag
+from models import Project, Video, Subtitle, SubtitleFlag, CommentFlag
 import socketio
 
 # Global instance
@@ -279,6 +279,41 @@ def ensure_video_metadata(video_id):
         except Exception as e:
             print(f"❌ Failed to download metadata for {video_id}: {e}")
 
+def check_video_duration(video_url, min_duration_minutes):
+    """Check if video meets minimum duration requirement. Returns (meets_requirement, duration_minutes)"""
+    if min_duration_minutes <= 0:
+        return True, 0  # No filtering needed
+
+    try:
+        video_id = extract_video_id(video_url)
+        info_file = f"{video_id}.info.json"
+
+        # Download info if not exists
+        if not os.path.exists(info_file):
+            print(f"📥 Downloading video metadata to check duration...")
+            download_video_info(video_url)
+
+        # Read duration from info file
+        if os.path.exists(info_file):
+            with open(info_file, 'r', encoding='utf-8') as f:
+                info = json.load(f)
+                duration_seconds = info.get('duration', 0)
+                duration_minutes = duration_seconds / 60 if duration_seconds else 0
+
+                if duration_minutes < min_duration_minutes:
+                    print(f"⏭️  Skipping video: {duration_minutes:.1f} min < {min_duration_minutes} min minimum")
+                    return False, duration_minutes
+                else:
+                    print(f"✅ Video duration: {duration_minutes:.1f} minutes (meets {min_duration_minutes} min requirement)")
+                    return True, duration_minutes
+
+        # If no info available, allow processing (fail-safe)
+        return True, 0
+
+    except Exception as e:
+        print(f"⚠️  Could not check video duration: {e}. Proceeding anyway...")
+        return True, 0
+
 def download_subtitles_for_video(video_url, language):
     print(f"\n🎬 Downloading subtitles for video: {video_url}")
     video_id = extract_video_id(video_url)
@@ -426,24 +461,102 @@ def convert_srt_file(srt_file, threshold=30):
         output_lines.append("")
     return "\n".join(output_lines)
 
-def get_video_list(channel_url):
+def get_video_list(channel_url, min_duration_minutes=0):
+    """Get list of videos from channel, optionally filtering by minimum duration"""
     playlist_url = channel_url.rstrip("/") + "/videos"
     print("🔍 Retrieving video list from:", playlist_url)
+
+    # Always use flat-playlist first for speed (gets all video IDs quickly)
+    print("📥 Getting video list (fast mode)...")
     result = subprocess.run(["yt-dlp", "-J", "--flat-playlist", playlist_url],
                             capture_output=True, text=True, check=True)
+
     data = json.loads(result.stdout)
     entries = data.get("entries", [])
-    video_list = []
     total = len(entries)
+
+    print(f"📊 Found {total} videos in channel")
+
+    # If no duration filter, return all videos quickly
+    if min_duration_minutes <= 0:
+        video_list = []
+        for idx, entry in enumerate(entries):
+            video_id = entry.get("id")
+            title = entry.get("title", "")
+            timestamp = entry.get("timestamp")
+            if timestamp is None:
+                timestamp = total - idx
+            video_list.append({
+                "id": video_id,
+                "title": title,
+                "timestamp": timestamp,
+                "duration": 0
+            })
+        print(f"✅ Returning all {len(video_list)} videos (no duration filter)")
+        return video_list
+
+    # If duration filter is set, we need to check each video individually
+    print(f"⏱️  Filtering by minimum duration: {min_duration_minutes} minutes")
+    print(f"⚠️  This will check metadata for each video individually (may take time)")
+
+    video_list = []
+    filtered_count = 0
+    checked_count = 0
+
     for idx, entry in enumerate(entries):
         video_id = entry.get("id")
         title = entry.get("title", "")
         timestamp = entry.get("timestamp")
+
         if timestamp is None:
             timestamp = total - idx
-        video_list.append({"id": video_id, "title": title, "timestamp": timestamp})
-    
-    print(f"✅ Found {len(video_list)} videos in channel")
+
+        # Get duration for this specific video
+        try:
+            checked_count += 1
+            if checked_count % 10 == 0:
+                print(f"   ⏳ Checked {checked_count}/{total} videos... ({len(video_list)} passed filter)")
+
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+            # Get individual video info
+            info_result = subprocess.run(
+                ["yt-dlp", "-J", "--no-playlist", video_url],
+                capture_output=True,
+                text=True,
+                timeout=10  # 10 second timeout per video
+            )
+
+            if info_result.returncode == 0:
+                video_info = json.loads(info_result.stdout)
+                duration = video_info.get("duration", 0)
+                duration_minutes = duration / 60 if duration else 0
+
+                if duration_minutes >= min_duration_minutes:
+                    video_list.append({
+                        "id": video_id,
+                        "title": title,
+                        "timestamp": timestamp,
+                        "duration": duration
+                    })
+                else:
+                    filtered_count += 1
+            else:
+                # If failed to get info, skip this video
+                print(f"   ⚠️  Could not get info for {video_id}, skipping...")
+                filtered_count += 1
+
+        except subprocess.TimeoutExpired:
+            print(f"   ⏱️  Timeout checking {video_id}, skipping...")
+            filtered_count += 1
+        except Exception as e:
+            print(f"   ❌ Error checking {video_id}: {e}")
+            filtered_count += 1
+
+    if filtered_count > 0:
+        print(f"⏭️  Filtered out {filtered_count} videos (shorter than {min_duration_minutes} minutes)")
+
+    print(f"✅ Found {len(video_list)} videos matching criteria (from {total} total)")
     return video_list
 
 def build_individual_video_command(video_id, base_args):
@@ -479,29 +592,32 @@ def build_individual_video_command(video_id, base_args):
     # Add boolean flags
     if base_args.comments:
         cmd.append('--comments')
-    
+
     if base_args.skip_convert:
         cmd.append('--skip-convert')
-    
+
     if base_args.skip_analyze:
         cmd.append('--skip-analyze')
-    
+
     if base_args.update_ytdlp:
         cmd.append('--update-ytdlp')
-    
+
     if base_args.keep_json:
         cmd.append('--keep-json')
-    
+
+    if base_args.no_moderation:
+        cmd.append('--no-moderation')
+
     return ' '.join(cmd)
 
 def add_channel_videos_to_queue(channel_url, args):
     """Process channel by adding individual video commands to the queue"""
     print(f"🎯 Channel mode: Processing {channel_url}")
     print("📋 This will add individual video commands to the processing queue")
-    
+
     try:
-        # Get list of videos from the channel
-        video_list = get_video_list(channel_url)
+        # Get list of videos from the channel, filtered by minimum duration if specified
+        video_list = get_video_list(channel_url, args.min_duration)
         
         if not video_list:
             print("❌ No videos found in the channel")
@@ -663,49 +779,89 @@ def highlight_text(text, keywords):
         text = pattern.sub(lambda m: '<span style="background-color: yellow;">{}</span>'.format(m.group(0)), text)
     return text
 
-def analyze_file(file_path, keywords):
+def analyze_file(file_path, keywords, no_moderation=False):
     print(f"🔍 Analyzing file: {file_path}")
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.readlines()
-    
-    results = []
+
+    all_subtitles = []  # ALL subtitles (flagged and non-flagged)
+    flagged_results = []  # Only flagged subtitles
     filename = os.path.basename(file_path)
-    video_id = filename.split('.')[0]
-    
-    print(f"   Processing {len(content)} lines from {filename}")
-    
+
+    # Extract video_id from filename (handles formats like "VIDEO_ID.s30" or "VIDEO_ID.es.s30")
+    # Remove .s30 extension first, then get the first part before any language code
+    video_id = filename.replace('.s30', '').split('.')[0]
+
+    print(f"   Processing {len(content)} lines from {filename} (video_id: {video_id})")
+
+    if no_moderation:
+        print(f"   ⚠️ No moderation mode: Saving all subtitles without AI analysis")
+
     for i, line in enumerate(content):
-        if keywords and not any(keyword.lower() in line.lower() for keyword in keywords):
-            continue
-            
         line_clean = line.strip()
         if not line_clean:
             continue
-            
+
         timestamp = None
         if i > 0:
             prev_line = content[i - 1].strip()
             if prev_line.replace('.', '').isdigit():
                 timestamp = float(prev_line)
 
-        moderation_response = moderate_text(line_clean)
-        moderation_result = moderation_response["results"][0]
-        flagged = moderation_result.get("flagged", False)
-        categories = [cat for cat, val in moderation_result.get("categories", {}).items() if val]
-        if flagged:
-            youtube_url = None
-            if timestamp is not None:
-                youtube_url = f"https://www.youtube.com/watch?v={video_id}&t={int(timestamp)}"
-            results.append({
+        # Skip timestamp lines themselves
+        if line_clean.replace('.', '').isdigit():
+            continue
+
+        youtube_url = None
+        if timestamp is not None:
+            youtube_url = f"https://www.youtube.com/watch?v={video_id}&t={int(timestamp)}"
+
+        # If no_moderation is True, skip AI moderation and save all subtitles without analysis
+        if no_moderation:
+            # Save all subtitles without moderation
+            all_subtitles.append({
                 "Filename": filename,
                 "Timestamp": timestamp,
                 "Texto": line_clean,
-                "Categorías": ", ".join(categories),
+                "IsFlagged": False,  # Not flagged since we're not analyzing
+                "Categorías": "",
                 "YouTubeURL": youtube_url
             })
-    
-    print(f"   🚩 Found {len(results)} flagged items in {filename}")
-    return results
+        else:
+            # Moderate the text with AI
+            moderation_response = moderate_text(line_clean)
+            moderation_result = moderation_response["results"][0]
+            flagged = moderation_result.get("flagged", False)
+            categories = [cat for cat, val in moderation_result.get("categories", {}).items() if val]
+
+            # Add to ALL subtitles
+            all_subtitles.append({
+                "Filename": filename,
+                "Timestamp": timestamp,
+                "Texto": line_clean,
+                "IsFlagged": flagged,
+                "Categorías": ", ".join(categories) if flagged else "",
+                "YouTubeURL": youtube_url
+            })
+
+            # If flagged, also add to flagged results (for backward compatibility with SubtitleFlag)
+            if flagged:
+                # Check if matches keywords filter (if specified)
+                if keywords and not any(keyword.lower() in line_clean.lower() for keyword in keywords):
+                    continue
+
+                flagged_results.append({
+                    "Filename": filename,
+                    "Timestamp": timestamp,
+                    "Texto": line_clean,
+                    "Categorías": ", ".join(categories),
+                    "YouTubeURL": youtube_url
+                })
+
+    print(f"   📝 Found {len(all_subtitles)} total subtitles in {filename}")
+    if not no_moderation:
+        print(f"   🚩 Found {len(flagged_results)} flagged items in {filename}")
+    return all_subtitles, flagged_results
 
 def extract_video_metadata(video_id):
     info_file = f"{video_id}.info.json"
@@ -861,15 +1017,17 @@ def cleanup_temporary_files(video_ids, keep_info_json=True):
     else:
         print("ℹ️ No temporary files to clean")
 
-def merge_analysis_results(keywords, project_name, comment_results=None):
+def merge_analysis_results(keywords, project_name, comment_results=None, no_moderation=False):
     s30_files = glob.glob("*.s30")
-    subtitle_results = []
-    
+    all_subtitles = []  # All subtitles (flagged and non-flagged)
+    subtitle_results = []  # Only flagged subtitles
+
     print(f"🔍 Found {len(s30_files)} .s30 files to analyze")
-    
+
     for file in s30_files:
-        file_results = analyze_file(file, keywords)
-        subtitle_results.extend(file_results)
+        file_all_subs, file_flagged_subs = analyze_file(file, keywords, no_moderation=no_moderation)
+        all_subtitles.extend(file_all_subs)
+        subtitle_results.extend(file_flagged_subs)
     
     if comment_results is None:
         comment_results = []
@@ -888,10 +1046,15 @@ def merge_analysis_results(keywords, project_name, comment_results=None):
         # Process videos first
         video_map = {}  # video_id -> Video object
         all_video_ids = set()
-        
-        # Extract video IDs from results
+
+        # Extract video IDs from ALL subtitles (including non-flagged ones)
+        for item in all_subtitles:
+            video_id = item["Filename"].replace('.s30', '').split('.')[0]
+            all_video_ids.add(video_id)
+
+        # Also extract from flagged results and comments
         for item in subtitle_results + comment_results:
-            video_id = item["Filename"].split('.')[0]
+            video_id = item["Filename"].replace('.s30', '').split('.')[0]
             all_video_ids.add(video_id)
         
         # Create or update videos and mark them as completed
@@ -944,12 +1107,40 @@ def merge_analysis_results(keywords, project_name, comment_results=None):
             
             # Ensure thumbnail
             ensure_thumbnail(video_id)
-        
-        # Save subtitle flags
+
+        # Save ALL subtitles to the new Subtitle table
+        print(f"💾 Saving {len(all_subtitles)} total subtitles to database...")
+        for item in all_subtitles:
+            video_id = item["Filename"].replace('.s30', '').split('.')[0]
+            video = video_map.get(video_id)
+
+            if video:
+                # Check if already exists
+                existing = session.query(Subtitle).filter_by(
+                    project_id=project.id,
+                    video_id=video.id,
+                    timestamp=item.get("Timestamp"),
+                    text=item["Texto"]
+                ).first()
+
+                if not existing:
+                    subtitle = Subtitle(
+                        project_id=project.id,
+                        video_id=video.id,
+                        timestamp=item.get("Timestamp"),
+                        text=item["Texto"],
+                        youtube_url=item.get("YouTubeURL", ""),
+                        is_flagged=item.get("IsFlagged", False),
+                        categories=item.get("Categorías", "")
+                    )
+                    session.add(subtitle)
+
+        # Save subtitle flags (for backward compatibility and UI)
+        print(f"🚩 Saving {len(subtitle_results)} flagged subtitles to SubtitleFlag table...")
         for item in subtitle_results:
             video_id = item["Filename"].split('.')[0]
             video = video_map.get(video_id)
-            
+
             if video:
                 # Check if already exists
                 existing = session.query(SubtitleFlag).filter_by(
@@ -958,7 +1149,7 @@ def merge_analysis_results(keywords, project_name, comment_results=None):
                     timestamp=item.get("Timestamp"),
                     text=item["Texto"]
                 ).first()
-                
+
                 if not existing:
                     subtitle_flag = SubtitleFlag(
                         project_id=project.id,
@@ -1010,9 +1201,10 @@ def merge_analysis_results(keywords, project_name, comment_results=None):
         
         # Commit all changes
         session.commit()
-        
+
         print(f"\n📊 Results saved to database for project '{project_name}':")
-        print(f"   - {len(subtitle_results)} subtitle flags")
+        print(f"   - {len(all_subtitles)} total subtitles saved")
+        print(f"   - {len(subtitle_results)} subtitle flags (hate speech)")
         print(f"   - {len(comment_results)} comment flags")
         print(f"   - {len(video_map)} videos processed and marked as completed")
         
@@ -1150,6 +1342,7 @@ def main():
     parser.add_argument("--language", type=str, default="en", help="Language for subtitles (default: en)")
     parser.add_argument("--openai-api-key", type=str, help="OpenAI API key for content moderation")
     parser.add_argument("--threshold", type=int, default=30, help="Time threshold (in seconds) for SRT grouping (default: 30)")
+    parser.add_argument("--min-duration", type=int, default=0, help="Minimum video duration in minutes. Skip videos shorter than this (default: 0 = analyze all)")
     parser.add_argument("--skip-convert", action="store_true", help="Skip converting SRT files")
     parser.add_argument("--skip-analyze", action="store_true", help="Skip analyzing converted files")
     parser.add_argument("--comments", action="store_true", help="Process video comments in addition to subtitles")
@@ -1163,7 +1356,9 @@ def main():
                         help="Update yt-dlp to latest version before processing")
     parser.add_argument("--keep-json", action="store_true",
                         help="Keep JSON files after processing (default: clean up)")
-    
+    parser.add_argument("--no-moderation", action="store_true",
+                        help="Save all subtitles without AI moderation (no hate speech detection)")
+
     args = parser.parse_args()
     
     # Update yt-dlp if requested
@@ -1203,8 +1398,9 @@ def main():
         api_manager = ModerationAPIManager(max_requests_per_second=args.rate_limit)
         print(f"🚀 API Manager configured: max {args.rate_limit} requests/second")
         
-        # Configure OpenAI API
-        if not args.skip_analyze or args.comments:
+        # Configure OpenAI API (only if we need moderation)
+        # Skip API configuration if using --no-moderation (unless analyzing comments)
+        if (not args.skip_analyze and not args.no_moderation) or args.comments:
             env_key = os.environ.get("OPENAI_API_KEY")
             if env_key:
                 openai.api_key = env_key
@@ -1216,21 +1412,46 @@ def main():
                 api_key_input = input("Please enter your OpenAI API key: ")
                 openai.api_key = api_key_input
                 client = OpenAI(api_key=api_key_input)
+        else:
+            # No API key needed for no-moderation mode
+            client = None
+            print("⚠️ No moderation mode: Skipping OpenAI API configuration")
 
         video_list = []
         comment_results = []
-        
+
         check_videos_already_processed(args.project, args.video)
-        video_list = args.video
-        
+
+        # Filter videos by duration if min_duration is specified
+        videos_to_process = []
+        if args.min_duration > 0:
+            print(f"\n⏱️  Checking video durations (minimum: {args.min_duration} minutes)...")
+            for video_url in args.video:
+                meets_requirement, duration = check_video_duration(video_url, args.min_duration)
+                if meets_requirement:
+                    videos_to_process.append(video_url)
+                else:
+                    print(f"⏭️  Skipped: {video_url}")
+
+            if not videos_to_process:
+                print(f"\n⚠️  All videos were filtered out (shorter than {args.min_duration} minutes)")
+                print("✅ Nothing to process")
+                sys.exit(0)
+
+            print(f"\n✅ {len(videos_to_process)}/{len(args.video)} videos meet duration requirement")
+        else:
+            videos_to_process = args.video
+
+        video_list = videos_to_process
+
         # Mark videos as processing at start
         print("🔄 Marking videos as processing...")
-        update_video_processing_status(args.project, args.video, 'processing')
-        
+        update_video_processing_status(args.project, videos_to_process, 'processing')
+
         try:
             # Download subtitles if not skipped
             if not args.skip_convert:
-                for video_url in args.video:
+                for video_url in videos_to_process:
                     download_subtitles_for_video(video_url, args.language)
             
             # Process comments if requested
@@ -1258,18 +1479,18 @@ def main():
             if not args.skip_analyze:
                 s30_files = glob.glob("*.s30")
                 if s30_files or args.comments:
-                    merge_analysis_results(args.keywords, args.project, comment_results)
+                    merge_analysis_results(args.keywords, args.project, comment_results, no_moderation=args.no_moderation)
                 else:
                     print("⚠️ No subtitle files to analyze. Use --comments to process comments only.")
                     # Mark as completed if no analysis
                     print("🔄 Marking videos as completed (no analysis needed)...")
                     update_video_processing_status(args.project, args.video, 'completed')
-                    
+
                     # Clean up temporary files even if no analysis
                     video_ids = [extract_video_id(url) for url in args.video]
                     cleanup_temporary_files(video_ids, keep_info_json=not args.keep_json)
             elif args.comments and comment_results:
-                merge_analysis_results(args.keywords, args.project, comment_results)
+                merge_analysis_results(args.keywords, args.project, comment_results, no_moderation=args.no_moderation)
             else:
                 # Mark as completed if analysis was skipped
                 print("🔄 Marking videos as completed (analysis skipped)...")

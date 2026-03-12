@@ -1,0 +1,5 @@
+*.json
+venv/
+.claude/
+__pycache__/
+thumbnails/

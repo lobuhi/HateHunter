@@ -1799,3 +1799,73 @@ tbody tr {
     font-size: 12px;
     line-height: 1.4;
 }
+
+/* Pagination Controls */
+.pagination-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 15px;
+    background-color: var(--gray-50);
+    border-radius: 8px;
+    margin: 15px 0;
+    flex-wrap: wrap;
+}
+
+.pagination-controls button {
+    padding: 8px 16px;
+    background-color: var(--secondary-blue);
+    color: var(--white);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.pagination-controls button:hover:not(:disabled) {
+    background-color: var(--primary-blue);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+
+.pagination-controls button:disabled {
+    background-color: var(--gray-300);
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.pagination-controls input[type="number"] {
+    padding: 6px 10px;
+    border: 2px solid var(--gray-300);
+    border-radius: 6px;
+    font-size: 14px;
+    text-align: center;
+    width: 60px;
+}
+
+.pagination-controls select {
+    padding: 8px 12px;
+    border: 2px solid var(--gray-300);
+    border-radius: 6px;
+    font-size: 14px;
+    background-color: var(--white);
+    cursor: pointer;
+    transition: border-color 0.2s ease;
+}
+
+.pagination-controls select:hover {
+    border-color: var(--secondary-blue);
+}
+
+.pagination-controls select:focus,
+.pagination-controls input[type="number"]:focus {
+    outline: none;
+    border-color: var(--secondary-blue);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
