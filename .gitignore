@@ -3,3 +3,6 @@ venv/
 .claude/
 __pycache__/
 thumbnails/
+hatehunter.db
+hatehunter.db-shm
+hatehunter.db-wal
